@@ -1,0 +1,5 @@
+.build/
+*.swp
+/local/
+/Plack-Middleware-MangleEnv-*.tar.gz
+/Plack-Middleware-MangleEnv-*/

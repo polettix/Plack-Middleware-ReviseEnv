@@ -8,7 +8,8 @@ Plack::Middleware::MangleEnv - Mangle request environment at will
 
 =head1 VERSION
 
-This document describes Plack::Middleware::MangleEnv version 0.01.
+This document describes Plack::Middleware::MangleEnv version {{[ version
+]}}.
 
 =head1 SYNOPSIS
 
@@ -16,48 +17,348 @@ This document describes Plack::Middleware::MangleEnv version 0.01.
 
    my $mw = Plack::Middleware::MangleEnv->new(
 
-      # overriding
+      # overriding is the default behaviour
+
+      # straight value, must be a plain SCALAR (no refs)
       var_name    => 'a simple, overriding value',
-      some_value  => [ $whatever ],
+
+      # any value can be wrapped, even refs
+      some_value  => [ \@whatever ],
+
+      # or you can be just explicit
       alternative => { value => $whatever },
-      from_ENV    => { ENV => 'SOME_ENV_VAR' },
 
-      # override is a boolean flag, when set to 0 the value is
-      # set only if not already present
+      # you can read stuff from %ENV
+      from_ENV    => { ENV => 'PLACK_ENV' },
+
+      # or read other variables from $env
+      from_env    => { env => 'psgi.url_scheme' },
+
+      # turn override into defaulting, works with value, env and ENV
       de_fault    => { value => $something, override => 0 },
-      # also works with ENV
 
-      # get rid of a variable, inconditionally
+      # get rid of a variable, inconditionally. You can pass "no value"
+      # or be explicit about your intent
       delete_pliz => [],
       delete_me   => { remove => 1 },
 
-      # flexibility
+      # use subroutines for maximum flexibility. They can be strings or
+      # be loaded from modules too.
       change_me1  => sub { ... },
       change_me2  => { sub => sub { ... } },
       change_me3  => { sub => 'sub { ... }' },
+      change_me4  => { sub => [$factory, @params] },
+
    );
 
+   # when evaluation order or repetition is important... use an array
+   # reference
+   my $mw2 = Plack::Middleware::MangleEnv->new(
+      mangle => [
+         same_as => 'before', # set this at the beginning...
+         what => {env => 'same_as'},
+         ...,
+         same_as => [], # ... and delete this at the end
+      ]
+   );
 
 =head1 DESCRIPTION
 
-This module allows you to...
+This module allows you to mangle L<Plack>'s C<$env> that is passed along
+to the sequence of I<app>s, taking values from:
+
+=over
+
+=item *
+
+direct configuration;
+
+=item *
+
+values from C<%ENV>;
+
+=item *
+
+other values in C<$env> itself;
+
+=item *
+
+subroutines.
+
+=back
+
+=head2 How Variables Are Set
+
+The end goal of this middleware module is to manipulate C<$env> by
+adding, changing or deleting its items.
+
+You can pass the different actions to be performed as key-value pairs.
+They can either appear directly upon invoking the middleware, as in the
+following example:
+
+   my $mw = Plack::Middleware::MangleEnv->new(
+      var_name    => 'a simple, overriding value',
+      some_value  => [ \@whatever ],
+      alternative => { value => $whatever },
+      # ... you get the idea
+   );
+
+or wrap these pairs inside an array reference whose key is
+C<mangle>, like in the following example:
+
+   my $mw = Plack::Middleware::MangleEnv->new(
+      mangle => [
+         var_name    => 'a simple, overriding value',
+         some_value  => [ \@whatever ],
+         alternative => { value => $whatever },
+         # ... you get the idea
+      ]
+   );
+
+Although more verbose, this second approach is superior because it
+allows you to:
+
+=over
+
+=item *
+
+define the exact order of evaluation for mangling actions;
+
+=item *
+
+define multiple actions for the same key, possibly at different stages;
+
+=item *
+
+use keys C<mangle> and C<app>, if you need them.
+
+=back
+
+There's a wide range of possible I<values> that you can set associated
+to a key, which allow you to perform a plethora of operations. In
+particular:
+
+=over
+
+=item B<< Simple scalar >>
+
+   key => 'some simple, non-reference scalar',
+
+a I<non-reference> scalar is always taken as-is and then set in C<$env>.
+
+=item B<< Array reference >>
+
+   key => [],
+   key => [ { 'a non' => 'trivial scalar' } ],
+
+when you pass an array reference, it can be either empty (in which case
+the associated key will be I<removed> from C<$env>) or contain exactly
+one value, which will be set into C<$env>. This alternative allows you
+to pass any scalar, not just non-reference ones.
+
+=item B<< Sub reference >>
+
+   key => sub { ... },
+
+the sub reference will be called for each C<$env> and its return value
+used to figure out the value to associate to the key. See
+L</Sub Reference Interface> for details on the expected interface for
+the sub;
+
+=item B<< Hash reference >>
+
+allows you to be I<verbosely clear> about what you want, in addition to
+giving you knobs to modify the behaviour. The allowed keys are the
+following:
+
+=over
+
+=item C<env>
+
+points to a string that will be used to extract the value from C<$env>
+itself. Useful if you want to I<change the name> of a parameter;
+
+Can not appear together with either C<ENV> or C<value>, for obvious
+reasons;
+
+=item C<ENV>
+
+points to a string that will be used to extract the value from C<%ENV>.
+Useful if you want to get some variables from the environment, e.g. see
+L</Example Scenario>.
+
+Can not appear together with either C<env> or C<value>, for obvious
+reasons;
+
+=item C<override>
+
+boolean flag that indicates whether the new value overrides a previous
+one, if any. Set to a false value to avoid overriding an existing value,
+while still being able to provide a default one if the key is missing
+from C<$env>.
+
+Defaults to a true value;
+
+=item C<sub>
+
+set a subroutine, which can be a real sub reference, a text string
+holding the definition (it will be C<eval>ed) or an array reference with
+pointers to a factory for the sub reference.
+
+See L</Sub Reference Interface> for details;
+
+=item C<value>
+
+Can not appear together with either C<env> or C<ENV>, for obvious
+reasons.
+
+=back
+
+=back
+
+
+=head2 Sub Reference Interface
+
+The most flexible way to mangle C<$env> is through a subroutine. It can
+be provided either directly associated to the key, or through the C<sub>
+sub-key in the hash associated to the key. In this latter case, in
+addition to providing a real sub reference, you can also pass:
+
+=over
+
+=item *
+
+a text string. This is C<eval>ed and is expected to return a sub
+reference;
+
+=item *
+
+an array reference, like this:
+
+   [ 'Some::Package::factory', @parameters ]
+
+The I<factory> function is loaded and called with the provided
+C<@parameters>, and it is expected to return a sub reference.
+
+In case you don't fully qualify the sub for the factory, it will be
+referred to C<Plack::Middleware::MangleEnv> or whatever derived class
+you're actually using. One useful function for this is L</ref_to>, that
+give you a reference to a sub in a package, like this:
+
+   [ ref_to => 'Some::Package::mangler' ]
+
+In this case, it will C<require> package C<Some::Package> and then get a
+reference to C<mangler> inside it. Yes, this has limitations (e.g. it
+does not allow you to load functions from embedded modules).
+
+=back
+
+Whatever the way, you will eventually land on a subroutine reference
+that, at the right time, will be called like this:
+
+   sub {
+      my ($current_value, $env, $key) = @_;
+      # do what you need
+      return @something;
+   }
+
+The I<sub> can modify C<$env> at will, e.g. by adding new keys or
+removing other ones based on your specific logic.
+
+If you don't return anything, or the C<undef> value, the corresponding
+C<$key> in C<$env> will be skipped (keeping its previous value if any).
+Otherwise, you are supposed to return one single value that can be:
+
+=over
+
+=item *
+
+B<not> an array reference, in which case it is used as the value
+associated to C<$key> in C<$env>;
+
+=item *
+
+an array reference. If the array is empty, the C<$key> is removed from
+C<$env>; otherwise, it MUST contain exactly one value, used to set the
+key C<$key> in C<$env> (which also allows you to set as output an array
+reference, even an empty one).
+
+=back
+
+Examples:
+
+   # nothing happens with this
+   sub { return }
+
+   # key is removed from $env
+   sub { return [] }
+
+   # key is set to an empty array in $env
+   sub { return [[]] }
+
+
+=head2 Example Scenario
+
+For example, suppose that you have a fancy reverse-proxy setup where you
+need to override some values in order to make your web toolkit happy
+(e.g. L<Dancer> or L<Mojolicious>).
+
+One example scenario might be the following:
+
+=over
+
+=item *
+
+you want to use L<Docker|https://www.docker.com/> to easily encapsulate
+your services
+
+=item *
+
+you want to put a front-end reverse proxy, e.g.
+L<nginx|http://nginx.org/>
+
+=item *
+
+you would like to spread configurations as little as possible.
+
+=back
+
+If you plan to use C<docker-compose>, you can concentrate most of the
+configurations inside the C<docker-compose.yml> file as environment
+variables that will be available to your mounted services, so that you
+can e.g. adapt to the actual front-end you will be serving for without
+chaning your application's configuration files.
+
 
 =head1 FUNCTIONS
 
+=head2 B<< ref_to >>
+
+   my $sub_ref = ref_to($target, $default_package);
+   $sub_ref = ref_to('Package::my_sub');
+   $sub_ref = ref_to('other_sub', 'Package::Some');
+
+get a reference to a sub whose name is contained in C<$target>,
+optionally searching it into package C<$default_package> if none is
+found in C<$target>.
+
+It uses C<require> to load the package, so if your package is a
+sub-package inside a differently-named file you're out of luck.
+
+=begin COMMENTED
+
+The following items are not documented because they are not supposed to
+be used.
+
 =over
 
-=item B<< whatever >>
+=item call
+
+=item prepare_app
 
 =back
 
-
-=head1 METHODS
-
-=over
-
-=item B<< whatever >>
-
-=back
+=end COMMENTED
 
 
 =head1 BUGS AND LIMITATIONS
@@ -66,7 +367,9 @@ Report bugs either through RT or GitHub (patches welcome).
 
 =head1 SEE ALSO
 
-Foo::Bar.
+L<Plack>, L<Plack::Middleware::ForceEnv>,
+L<Plack::Middleware::SetLocalEnv>,
+L<Plack::Middleware::SetEnvFromHeader>.
 
 =head1 AUTHOR
 

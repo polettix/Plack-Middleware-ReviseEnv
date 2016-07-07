@@ -1,4 +1,6 @@
 use strict;
+use Path::Tiny;
+use lib path(__FILE__)->parent()->stringify();
 use Test::More;
 use Plack::Test;
 use Plack::Builder;
@@ -27,7 +29,9 @@ $app = builder {
      what => {
       sub => sub { return 'ever' }
      },
-     ever  => {sub => 'sub {return uc(shift)}'},
+     ever => {sub => 'sub {return uc(shift)}'},
+     ohmy => {sub => ['TestPackage::factory']},
+     omg  => {sub => [ref_to => 'TestPackage::mangler']},
      rogue => sub {
       $_[1]->{side} = 'effect';
       return;
@@ -56,6 +60,8 @@ test_psgi $app, sub {
    is $last_env->{what}, 'ever',   'other variable set';
    is $last_env->{ever}, 'WHAT?',  'variable mangled from eval-ed sub';
    is $last_env->{side}, 'effect', 'variable set from side effect';
+   is $last_env->{ohmy}, 'works!', 'variable set from sub (factory)';
+   is $last_env->{omg},  'works!', 'variable set from sub (ref_to)';
    ok !exists($last_env->{rogue}), 'undef return value does not set';
 };
 

@@ -404,6 +404,13 @@ DISTRIBUTIONS
     requirements:
       ExtUtils::MakeMaker 6.30
       IO::File 1.14
+  Template-Perlish-1.52
+    pathname: P/PO/POLETTIX/Template-Perlish-1.52.tar.gz
+    provides:
+      Template::Perlish 1.52
+    requirements:
+      Module::Build::Tiny 0.034
+      perl 5.008000
   Test-Harness-3.36
     pathname: L/LE/LEONT/Test-Harness-3.36.tar.gz
     provides:

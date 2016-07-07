@@ -61,36 +61,39 @@ sub call {
 
 sub prepare_app {
    my ($self) = @_;
-   my %input  = %$self;
-   %$self =
-     (app => delete($input{app}), mangle => delete($input{mangle}) || {});
-   my $subself = $self->{mangle};
+   my %input = %$self;
+   my $app    = delete $input{app};
+   my $mangle = delete $input{mangle};
+   %input = (%$self, %$mangle) if $mangle;
+
+   $mangle = {};
+   %$self = (app => $app, mangle => $mangle);
 
  VAR:
    while (my ($key, $value) = each %input) {
       my $ref = ref $value;
       if (!$ref) {
-         $subself->{$key} = {value => $value, override => 1};
+         $mangle->{$key} = {value => $value, override => 1};
       }
       elsif ($ref eq 'ARRAY') {
          if (@$value == 0) {
-            $subself->{$key} = {remove => 1};
+            $mangle->{$key} = {remove => 1};
          }
          elsif (@$value == 1) {
-            $subself->{$key} = {value => $value->[0], override => 1};
+            $mangle->{$key} = {value => $value->[0], override => 1};
          }
          else {
             confess "array for '$key' has more than one value";
          }
       } ## end elsif ($ref eq 'ARRAY')
       elsif ($ref eq 'CODE') {
-         $subself->{$key} = {sub => $value, override => 1};
+         $mangle->{$key} = {sub => $value, override => 1};
       }
       elsif ($ref eq 'HASH') {
          if (delete($value->{remove})) {
             confess "remove MUST be alone when set to true"
               if keys(%$value) > 1;
-            $subself->{$key} = {remove => 1};
+            $mangle->{$key} = {remove => 1};
             next VAR;
          } ## end if (delete($value->{remove...}))
 
@@ -138,7 +141,7 @@ sub prepare_app {
             %$value = %v;    # just keep what was available
          }
          $value->{override} = $override;
-         $subself->{$key} = $value;    # probably paranoid
+         $mangle->{$key} = $value;    # probably paranoid
       } ## end elsif ($ref eq 'HASH')
       else {
          confess "invalid reference '$ref' for '$key'";

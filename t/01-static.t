@@ -35,7 +35,10 @@ $app = builder {
      test_delete_me   => {remove => 1},
 
      'psgi.url_scheme' => 'https',
-     ;
+     mangle => {
+        app => 'this',
+        mangle => 'that',
+     };
    $app;
 };
 
@@ -61,6 +64,8 @@ test_psgi $app, sub {
    is $res->content, "Hello World!", 'sample content';
 
    is $last_env->{'psgi.url_scheme'}, 'https', 'psgi variable overridden';
+   is $last_env->{app}, 'this', 'app variable overridden';
+   is $last_env->{mangle}, 'that', 'mangle variable overridden';
 
    my %vars = map { $_ => $last_env->{$_} }
      grep { /^test_/ }

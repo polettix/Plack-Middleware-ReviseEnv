@@ -27,14 +27,11 @@ $app = builder {
      what => {
       sub => sub { return 'ever' }
      },
-     ever => {
-        sub => 'sub {return uc(shift)}'
-     },
+     ever  => {sub => 'sub {return uc(shift)}'},
      rogue => sub {
-        $_[1]->{side} = 'effect';
-        return;
-     }
-     ;
+      $_[1]->{side} = 'effect';
+      return;
+     };
    $app;
 };
 
@@ -43,7 +40,7 @@ $app = builder {
    $app = sub {
       my $env = shift;
       $env->{test_base} = 'HTTPS://what.ever/';
-      $env->{ever} = 'what?';
+      $env->{ever}      = 'what?';
       return $oa->($env);
      }
 }
@@ -56,8 +53,8 @@ test_psgi $app, sub {
    is $res->content, "Hello World!", 'sample content';
 
    is $last_env->{'psgi.url_scheme'}, 'HTTPS', 'psgi variable overridden';
-   is $last_env->{what}, 'ever', 'other variable set';
-   is $last_env->{ever}, 'WHAT?', 'variable set from eval-ed sub';
+   is $last_env->{what}, 'ever',   'other variable set';
+   is $last_env->{ever}, 'WHAT?',  'variable mangled from eval-ed sub';
    is $last_env->{side}, 'effect', 'variable set from side effect';
    ok !exists($last_env->{rogue}), 'undef return value does not set';
 };

@@ -34,6 +34,20 @@
             "Dist::Milla" : "v1.0.15",
             "Test::Pod" : "1.41"
          }
+      },
+      "runtime" : {
+         "requires" : {
+            "Plack" : "1.0039",
+            "parent" : "0",
+            "perl" : "5.008001"
+         }
+      },
+      "test" : {
+         "requires" : {
+            "HTTP::Message" : "0",
+            "Path::Tiny" : "0.096",
+            "Test::More" : "0.88"
+         }
       }
    },
    "release_status" : "stable",

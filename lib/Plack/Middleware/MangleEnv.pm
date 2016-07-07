@@ -10,10 +10,10 @@ use parent 'Plack::Middleware';
 
 sub call {
    my ($self, $env) = @_;
-   my $mangle = $self->{mangle};
+   my @mangle = @{$self->{mangle}};
  VAR:
-   for my $key (keys %$mangle) {
-      my $value = $mangle->{$key};
+   while (@mangle) {
+      my ($key, $value) = splice @mangle, 0, 2;
       if ($value->{remove}) {
          delete $env->{$key};
          next VAR;
@@ -35,7 +35,7 @@ sub call {
       elsif (exists $value->{sub}) {
          defined(my $retval = $value->{sub}->($env->{$key}, $env, $key))
            or next VAR;
-         $retval = [ $retval ] unless ref($retval);
+         $retval = [$retval] unless ref($retval);
          confess "sub for '$key' returned an invalid value"
            unless ref($retval) eq 'ARRAY';
          if (@$retval == 0) {
@@ -54,46 +54,61 @@ sub call {
          confess "BUG in $package, value for '$key' not as expected: ",
            Data::Dumper::Dumper($value);
       } ## end else [ if (exists $value->{value...})]
-   } ## end VAR: for my $key (keys %$mangle)
+   } ## end VAR: while (@mangle)
 
    return $self->app()->($env);
 } ## end sub call
 
 sub prepare_app {
    my ($self) = @_;
-   my %input = %$self;
-   my $app    = delete $input{app};
-   my $mangle = delete $input{mangle};
-   %input = (%$self, %$mangle) if $mangle;
 
-   $mangle = {};
+   my %input = %$self;
+   my $app   = delete $input{app};
+
+   my @input;
+   my $mangle = delete $input{mangle};
+   if ($mangle) {
+      confess "'mangle' MUST point to an array reference"
+        unless ref($mangle) eq 'ARRAY';
+      confess "'mangle' array MUST contain an even number of items"
+        if @$mangle % 2;
+      confess "'mangle' MUST be standalone when present"
+        if keys %input;
+      @input = @$mangle;
+   } ## end if ($mangle)
+   else {
+      @input = %input;
+   }
+
+   $mangle = \my @output;
    %$self = (app => $app, mangle => $mangle);
 
  VAR:
-   while (my ($key, $value) = each %input) {
+   while (@input) {
+      my ($key, $value) = splice @input, 0, 2;
       my $ref = ref $value;
       if (!$ref) {
-         $mangle->{$key} = {value => $value, override => 1};
+         push @output, $key, {value => $value, override => 1};
       }
       elsif ($ref eq 'ARRAY') {
          if (@$value == 0) {
-            $mangle->{$key} = {remove => 1};
+            push @output, $key, {remove => 1};
          }
          elsif (@$value == 1) {
-            $mangle->{$key} = {value => $value->[0], override => 1};
+            push @output, $key, {value => $value->[0], override => 1};
          }
          else {
             confess "array for '$key' has more than one value";
          }
       } ## end elsif ($ref eq 'ARRAY')
       elsif ($ref eq 'CODE') {
-         $mangle->{$key} = {sub => $value, override => 1};
+         push @output, $key, {sub => $value, override => 1};
       }
       elsif ($ref eq 'HASH') {
          if (delete($value->{remove})) {
             confess "remove MUST be alone when set to true"
               if keys(%$value) > 1;
-            $mangle->{$key} = {remove => 1};
+            push @output, $key, {remove => 1};
             next VAR;
          } ## end if (delete($value->{remove...}))
 
@@ -141,12 +156,12 @@ sub prepare_app {
             %$value = %v;    # just keep what was available
          }
          $value->{override} = $override;
-         $mangle->{$key} = $value;    # probably paranoid
+         push @output, $key, $value;
       } ## end elsif ($ref eq 'HASH')
       else {
          confess "invalid reference '$ref' for '$key'";
       }
-   } ## end VAR: while (my ($key, $value) ...)
+   } ## end VAR: while (@input)
 
    return $self;
 } ## end sub prepare_app

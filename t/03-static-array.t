@@ -19,22 +19,26 @@ my $app = sub {
 };
 
 $app = builder {
-   enable 'MangleEnv',
-     test_var_name   => 'a simple, overriding value',
-     test_some_value => [{ENV => 'ever'}],
+   enable 'MangleEnv', mangle => [
+      test_var_name   => 'a simple, overriding value',
+      test_some_value => [{ENV => 'ever'}],
 
-     test_alternative => {value => {env => 'REMOTE_ADDR'}},
-     test_from_ENV    => {ENV   => 'WHATEVER'},
-     test_from_env    => {env   => 'REQUEST_METHOD'},
+      test_alternative => {value => {env => 'REMOTE_ADDR'}},
+      test_from_ENV    => {ENV   => 'WHATEVER'},
+      test_from_env    => {env   => 'REQUEST_METHOD'},
 
-     test_alternativex => {value => {env => 'REMOTE_ADDR'}, override => 0},
-     test_from_ENVx => {ENV => 'WHATEVER',       override => 0},
-     test_from_envx => {env => 'REQUEST_METHOD', override => 0},
+      test_alternativex =>
+        {value => {env => 'REMOTE_ADDR'}, override => 0},
+      test_from_ENVx => {ENV => 'WHATEVER',       override => 0},
+      test_from_envx => {env => 'REQUEST_METHOD', override => 0},
 
-     test_delete_pliz => [],
-     test_delete_me   => {remove => 1},
+      test_delete_pliz => [],
+      test_delete_me   => {remove => 1},
 
-     'psgi.url_scheme' => 'https';
+      'psgi.url_scheme' => 'https',
+      app               => 'this',
+      mangle            => 'that',
+   ];
    $app;
 };
 
@@ -60,6 +64,8 @@ test_psgi $app, sub {
    is $res->content, "Hello World!", 'sample content';
 
    is $last_env->{'psgi.url_scheme'}, 'https', 'psgi variable overridden';
+   is $last_env->{app},    'this', '"app" variable overridden';
+   is $last_env->{mangle}, 'that', '"mangle" variable overridden';
 
    my %vars = map { $_ => $last_env->{$_} }
      grep { /^test_/ }

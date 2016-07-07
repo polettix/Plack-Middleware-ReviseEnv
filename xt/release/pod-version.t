@@ -1,12 +1,14 @@
 use strict;
 use Test::More tests => 1;
-use Plack::Middleware::MangleEnv;
 
-(my $filename = $INC{'Plack/Middleware/MangleEnv.pm'}) =~
-  s{pm$}{pod};
+my $module = 'Plack::Middleware::MangleEnv';
+
+(my $packfile = "$module.pm") =~ s{::}{/}gmxs;
+require $packfile;
+
+(my $filename = $INC{$packfile}) =~ s{pm$}{pod};
 
 my $pod_version;
-
 {
    open my $fh, '<', $filename
      or BAIL_OUT "can't open '$filename'";
@@ -14,9 +16,14 @@ my $pod_version;
    local $/;
    my $module_text = <$fh>;
    ($pod_version) = $module_text =~ m{
-      ^This\ document\ describes\ Plack::Middleware::MangleEnv\ version\ (.*?)\.$
+      ^This\ document\ describes\ $module\ version\ (.*?)\.$
    }mxs;
 }
 
-is $pod_version, $Plack::Middleware::MangleEnv::VERSION,
-  'version in POD';
+my $version;
+{
+   no strict 'refs';
+   $version = ${$module . '::VERSION'};
+}
+
+is $pod_version, $version, 'version in POD';

@@ -49,9 +49,9 @@ sub call {
 # so we are more relaxed about *not* calling too many subs
 sub prepare_app {
    my ($self) = @_;
-   $self->_normalize_internal_structure();    # reorganize internally
+   $self->_normalize_input_structure();    # reorganize internally
    $self->{_manglers} = \my @manglers;    # where "real" manglers will be
-   my @inputs = @{$self->{mangle}};       # we will consume @inputs
+   my @inputs = @{$self->{manglers}};       # we will consume @inputs
 
    while (@inputs) {
       my ($key, $value) = splice @inputs, 0, 2;
@@ -78,25 +78,25 @@ sub prepare_app {
 
 # _PRIVATE METHODS_
 
-sub _normalize_internal_structure {
+sub _normalize_input_structure {
    my ($self) = @_;
-   if (exists $self->{mangle}) {
+   if (exists $self->{manglers}) {
       local $" = "', '";
-      my $mangle = $self->{mangle};
-      $mangle = $self->{mangle} = [ %$mangle ] if ref($mangle) eq 'HASH';
+      my $mangle = $self->{manglers};
+      $mangle = $self->{manglers} = [ %$mangle ] if ref($mangle) eq 'HASH';
       confess "'mangle' MUST point to an array or hash reference"
         unless ref($mangle) eq 'ARRAY';
       confess "'mangle' array MUST contain an even number of items"
         if @$mangle % 2;
       my @keys = keys %$self;
       confess "'mangle' MUST be standalone when present (found: '@keys')"
-        if grep { ($_ ne 'app') && ($_ ne 'mangle') } @keys;
+        if grep { ($_ ne 'app') && ($_ ne 'manglers') } @keys;
    } ## end if (exists $self->{mangle...})
    else {    # anything except app goes into mangle
       my $app = delete $self->{app};    # temporarily remove it
       %$self = (
-         app    => $app,                # put it back
-         mangle => [%$self],            # with rest as manglers
+         app      => $app,                # put it back
+         manglers => [%$self],            # with rest as manglers
       );
    } ## end else [ if (exists $self->{mangle...})]
    return $self;

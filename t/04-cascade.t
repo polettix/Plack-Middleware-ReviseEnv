@@ -19,7 +19,7 @@ my $app = sub {
 };
 
 $app = builder {
-   enable 'MangleEnv', mangle => [
+   enable 'MangleEnv', manglers => [
       splitted => sub {
          my $env = $_[1];
          return [[split /,/, $env->{input}]];

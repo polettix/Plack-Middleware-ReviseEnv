@@ -19,7 +19,7 @@ my $app = sub {
 };
 
 $app = builder {
-   enable 'MangleEnv', mangle => [
+   enable 'MangleEnv', manglers => [
       test_var_name   => 'a simple, overriding value',
       test_some_value => [{ENV => 'ever'}],
 
@@ -37,7 +37,7 @@ $app = builder {
 
       'psgi.url_scheme' => 'https',
       app               => 'this',
-      mangle            => 'that',
+      manglers          => 'that',
    ];
    $app;
 };
@@ -64,8 +64,8 @@ test_psgi $app, sub {
    is $res->content, "Hello World!", 'sample content';
 
    is $last_env->{'psgi.url_scheme'}, 'https', 'psgi variable overridden';
-   is $last_env->{app},    'this', '"app" variable overridden';
-   is $last_env->{mangle}, 'that', '"mangle" variable overridden';
+   is $last_env->{app},      'this', '"app" variable overridden';
+   is $last_env->{manglers}, 'that', '"manglers" variable overridden';
 
    my %vars = map { $_ => $last_env->{$_} }
      grep { /^test_/ }

@@ -8,22 +8,20 @@ use English qw< -no_match_vars >;
 
 use parent 'Plack::Middleware';
 
+# Note: manglers in "manglers" here are totally reconstructured and not
+# necessarily straightly coming from the "mangle" field in the original
 sub call {
    my ($self, $env) = @_;
-   my @mangle = @{$self->{mangle}};
  VAR:
-   while (@mangle) {
-      my ($key, $value) = splice @mangle, 0, 2;
+   for my $mangler (@{$self->{_manglers}}) {
+      my ($key, $value) = @$mangler;
       if ($value->{remove}) {
          delete $env->{$key};
-         next VAR;
       }
-      elsif (exists($env->{$key}) && !$value->{override}) {
-         next VAR;
+      elsif (exists($env->{$key}) && (! $value->{override})) {
+         # $env->{$key} is already OK here, do nothing!
       }
-
-      # here, we have to compute a value and set it in $env
-      if (exists $value->{value}) {    # set unconditionally
+      elsif (exists $value->{value}) {    # set unconditionally
          $env->{$key} = $value->{value};
       }
       elsif (exists $value->{env}) {    # copy from other item in $env
@@ -32,22 +30,9 @@ sub call {
       elsif (exists $value->{ENV}) {    # copy from %ENV
          $env->{$key} = $ENV{$value->{ENV}};
       }
-      elsif (exists $value->{sub}) {
-         defined(my $retval = $value->{sub}->($env->{$key}, $env, $key))
-           or next VAR;
-         $retval = [$retval] unless ref($retval);
-         confess "sub for '$key' returned an invalid value"
-           unless ref($retval) eq 'ARRAY';
-         if (@$retval == 0) {
-            delete $env->{$key};
-         }
-         elsif (@$retval == 1) {
-            $env->{$key} = $retval->[0];
-         }
-         else {
-            confess "too many return values from sub for '$key'";
-         }
-      } ## end elsif (exists $value->{sub...})
+      elsif (exists $value->{wrapsub}) {
+         $value->{wrapsub}->($env->{$key}, $env, $key);
+      }
       else {
          require Data::Dumper;
          my $package = ref $self;
@@ -59,109 +44,34 @@ sub call {
    return $self->app()->($env);
 } ## end sub call
 
+
+# Initialization code, this is executed once at application startup
+# so we are more relaxed about *not* calling too many subs
 sub prepare_app {
    my ($self) = @_;
+   $self->_normalize_internal_structure();  # reorganize internally
+   $self->{_manglers} = \my @manglers;      # where "real" manglers will be
+   my @inputs = @{$self->{mangle}};         # we will consume @inputs
 
-   my %input = %$self;
-   my $app   = delete $input{app};
-
-   my @input;
-   my $mangle = delete $input{mangle};
-   if ($mangle) {
-      confess "'mangle' MUST point to an array reference"
-        unless ref($mangle) eq 'ARRAY';
-      confess "'mangle' array MUST contain an even number of items"
-        if @$mangle % 2;
-      confess "'mangle' MUST be standalone when present"
-        if keys %input;
-      @input = @$mangle;
-   } ## end if ($mangle)
-   else {
-      @input = %input;
-   }
-
-   $mangle = \my @output;
-   %$self = (app => $app, mangle => $mangle);
-
- VAR:
-   while (@input) {
-      my ($key, $value) = splice @input, 0, 2;
+   while (@inputs) {
+      my ($key, $value) = splice @inputs, 0, 2;
       my $ref = ref $value;
-      if (!$ref) {
-         push @output, $key, {value => $value, override => 1};
+      if (!$ref) { # simple case, that's the value we want, full stop
+         push @manglers, [$key, {value => $value, override => 1}];
       }
       elsif ($ref eq 'ARRAY') {
-         if (@$value == 0) {
-            push @output, $key, {remove => 1};
-         }
-         elsif (@$value == 1) {
-            push @output, $key, {value => $value->[0], override => 1};
-         }
-         else {
-            confess "array for '$key' has more than one value";
-         }
-      } ## end elsif ($ref eq 'ARRAY')
+         $self->_add_array_mangler($key, $value, 1);
+      }
       elsif ($ref eq 'CODE') {
-         push @output, $key, {sub => $value, override => 1};
+         $self->_add_wrapsub_mangler($key, $value, 1);
       }
       elsif ($ref eq 'HASH') {
-         if (delete($value->{remove})) {
-            confess "remove MUST be alone when set to true"
-              if keys(%$value) > 1;
-            push @output, $key, {remove => 1};
-            next VAR;
-         } ## end if (delete($value->{remove...}))
-
-         my @allowed = qw< env ENV sub value >;
-         my %v = map { $_ => delete($value->{$_}) }
-           grep { exists $value->{$_} } @allowed;
-         if (keys(%v) != 1) {
-            local $" = "', '";
-            confess "one in ('@allowed') MUST be provided"
-              unless keys(%v);
-            confess "only one in ('@allowed') is allowed";
-         } ## end if (keys(%v) != 1)
-
-         my $override =
-           exists($value->{override}) ? delete($value->{override}) : 1;
-
-         if (my @residual = keys %$value) {
-            local $" = "', '";
-            confess "unknown keys ('@residual') in '$key'";
-         }
-
-         if (exists($v{sub})) {
-            my $sr = ref $v{sub};
-            if ($sr eq 'CODE') {    # keep it as it is
-               $value->{sub} = $v{sub};
-            }
-            elsif (!$sr) {          # string of text, eval it
-               $value->{sub} = eval $v{sub};
-               if (ref($value->{sub}) ne 'CODE') {
-                  my $error = $EVAL_ERROR || 'uknown error';
-                  confess "error in sub for '$key': $error";
-               }
-            } ## end elsif (!$sr)
-            elsif ($sr eq 'ARRAY') {
-               my ($factory, @params) = @{$v{sub}};
-               $factory = ref_to($factory, ref($self));
-               confess "invalid factory for '$key'"
-                 unless ref($factory) eq 'CODE';
-               $value->{sub} = $factory->(@params);
-               confess "invalid generated sub for '$key'"
-                 unless ref($value->{sub}) eq 'CODE';
-            } ## end elsif ($sr eq 'ARRAY')
-         } ## end if (exists($v{sub}))
-         else {
-            %$value = %v;    # just keep what was available
-         }
-         $value->{override} = $override;
-         push @output, $key, $value;
-      } ## end elsif ($ref eq 'HASH')
+         $self->_add_hash_mangler($key, $value, 1);
+      }
       else {
          confess "invalid reference '$ref' for '$key'";
       }
-   } ## end VAR: while (@input)
+   }
 
    return $self;
 } ## end sub prepare_app
@@ -179,6 +89,139 @@ sub ref_to {
    }
    return $package->can($name);
 } ## end sub ref_to
+
+# _PRIVATE METHODS_
+
+sub _normalize_internal_structure {
+   my ($self) = @_;
+   if (exists $self->{mangle}) {
+      my $mangle = $self->{mangle};
+      local $" = "', '";
+      confess "'mangle' MUST point to an array reference"
+         unless ref($mangle) eq 'ARRAY';
+      confess "'mangle' array MUST contain an even number of items"
+         if @$mangle % 2;
+      my @keys = keys %$self;
+      confess "'mangle' MUST be standalone when present (found: '@keys')"
+         if grep { ($_ ne 'app') && ($_ ne 'mangle') } @keys;
+   }
+   else { # anything except app goes into mangle
+      my $app = delete $self->{app}; # temporarily remove it
+      %$self = (
+         app => $app,                # put it back
+         mangle => [%$self],         # with rest as manglers
+      );
+   }
+   return $self;
+}
+
+sub _add_array_mangler {
+   my ($self, $key, $aref, $override) = @_;
+   my $manglers = $self->{_manglers};
+   if (@$aref == 0) {
+      push @$manglers, [$key => {remove => 1}];
+   }
+   elsif (@$aref == 1) {
+      push @$manglers, [$key => {value => $aref->[0], override => $override}];
+   }
+   else {
+      confess "array for '$key' has more than one value (@$aref)";
+   }
+   return;
+}
+
+sub _wrapsub_mangler {
+   my ($sub) = @_;
+   return sub {
+      my ($value, $env, $key) = @_;
+      defined (my $retval = $sub->($value, $env, $key)) or return;
+      $retval = [$retval] unless ref($retval);
+
+      confess "sub for '$key' returned an invalid value"
+        unless ref($retval) eq 'ARRAY';
+
+      my $n = scalar @$retval;
+      confess "too many return values (@$retval) from sub for '$key'"
+        if $n > 1;
+
+      $env->{$key} = $retval->[0] if $n;
+      delete $env->{$key} unless $n;
+      return;
+   };
+}
+
+sub _add_wrapsub_mangler {
+   my ($self, $key, $sub, $override) = @_;
+   push @{$self->{_manglers}}, [
+      $key => {
+         wrapsub => _wrapsub_mangler($sub),
+         override => $override,
+      }
+   ];
+   return;
+}
+
+sub __exactly_one_key_among {
+   my ($hash, @keys) = @_;
+   my @found = grep { exists $hash->{$_} } @keys;
+   return $found[0] if @found == 1;
+
+   local $" = "', '";
+   confess scalar(@found)
+     ? "one in ('@keys') MUST be provided, none found"
+     : "only one in ('@keys') is allowed, found ('@found')";
+}
+
+sub _add_hash_mangler {
+   my ($self, $key, $hash, $default_override) = @_;
+   my $manglers = $self->{_manglers};
+
+   if (delete($hash->{remove})) {
+      confess "remove MUST be alone when set to true"
+         if keys(%$hash) > 1;
+      push @$manglers, [$key, {remove => 1}];
+      return;
+   }
+
+   my $type = __exactly_one_key_among($hash, qw< env ENV sub value >);
+   my $value = delete $hash->{$type};
+
+   my $override = exists($hash->{override})
+     ? delete($hash->{override}) :
+     $default_override;
+
+   if (my @residual = keys %$hash) {
+      local $" = "', '";
+      confess "unknown keys ('@residual') in '$key'";
+   }
+
+   if ($type ne 'sub') { # quick one, just keep what's available
+      push @$manglers, [$key => {$type => $value, override => $override}];
+      return;
+   }
+
+   my $sr = ref $value;
+   if (!$sr) { # string of text, eval it
+      $value = eval $value;
+      if (ref($value) ne 'CODE') {
+         my $error = $EVAL_ERROR || 'uknown error';
+         confess "error in sub for '$key': $error";
+      }
+   } ## end elsif (!$sr)
+   elsif ($sr eq 'ARRAY') {
+      my ($factory, @params) = @$value;
+      $factory = ref_to($factory, ref($self));
+      confess "invalid factory for '$key'" unless ref($factory) eq 'CODE';
+      $value = $factory->(@params);
+      confess "invalid sub for '$key'" unless ref($value) eq 'CODE';
+   } ## end elsif ($sr eq 'ARRAY')
+   elsif ($sr ne 'CODE') {
+      confess "invalid type for sub: $sr";
+   }
+
+   $self->_add_wrapsub_mangler($key, $value, $override);
+   return;
+}
 
 1;
 __END__

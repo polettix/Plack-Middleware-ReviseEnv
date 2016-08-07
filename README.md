@@ -120,17 +120,27 @@ particular:
 
     when you pass an array reference, it can be either empty (in which case
     the associated key will be _removed_ from `$env`) or contain exactly
-    one value, which will be set into `$env`. This alternative allows you
-    to pass any scalar, not just non-reference ones.
+    one value, which will be set into `$env`.
+
+    This alternative allows you to pass any scalar, not just non-reference
+    ones; so the following examples will do what they say:
+
+        # set key to an array ref with numbers 1..3 inside
+        key => [ [1..3] ], # note: array ref inside array ref!
+
+        # set key to a hash reference, literally
+        key => [ { a => 'b', c => 'd' } ],
+
+        # set key to a sub reference, literally
+        key => [ sub { 'I go with key!' } ],
 
 - **Sub reference**
 
         key => sub { ... },
 
-    the sub reference will be called for each `$env` and its return value
-    used to figure out the value to associate to the key. See
-    ["Sub Reference Interface"](#sub-reference-interface) for details on the expected interface for
-    the sub;
+    the sub reference will be called and its return value used to figure out
+    the value to associate to the key. See ["Sub Reference Interface"](#sub-reference-interface) for
+    details on the expected interface for the sub;
 
 - **Hash reference**
 
@@ -176,6 +186,18 @@ particular:
 
         Can not appear together with either `env` or `ENV`, for obvious
         reasons.
+
+        This is an alternative way to set a value that is not a simple plain
+        scalar:
+
+            # set key to an array ref with numbers 1..3 inside
+            key => { value => [1..3] },
+
+            # set key to a hash reference, literally
+            key => { value => { a => 'b', c => 'd' } }, # note: hash in hash!
+
+            # set key to a sub reference, literally
+            key => { value => sub { 'I go with key!' } },
 
 ## Sub Reference Interface
 
@@ -244,19 +266,7 @@ For example, suppose that you have a fancy reverse-proxy setup where you
 need to override some values in order to make your web toolkit happy
 (e.g. [Dancer](https://metacpan.org/pod/Dancer) or [Mojolicious](https://metacpan.org/pod/Mojolicious)).
 
-One example scenario might be the following:
-
-- you want to use [Docker](https://www.docker.com/) to easily encapsulate
-your services
-- you want to put a front-end reverse proxy, e.g.
-[nginx](http://nginx.org/)
-- you would like to spread configurations as little as possible.
-
-If you plan to use `docker-compose`, you can concentrate most of the
-configurations inside the `docker-compose.yml` file as environment
-variables that will be available to your mounted services, so that you
-can e.g. adapt to the actual front-end you will be serving for without
-chaning your application's configuration files.
+The example scenario will be detailed in a later stage!
 
 # FUNCTIONS
 
@@ -272,6 +282,94 @@ found in `$target`.
 
 It uses `require` to load the package, so if your package is a
 sub-package inside a differently-named file you're out of luck.
+
+# METHODS
+
+## **ALLOW\_EVAL**
+
+    my $perl_bool = $self->ALLOW_EVAL();
+
+this method tells you whether the `eval` interface for subroutines is
+enabled or not.
+
+The default implementation returns `0`, i.e. a false value. This means
+that the `eval` interface is _disabled_.
+
+Hence, to enable the `eval` interface, you MUST override or
+monkey-patch this method to return a true value (in Perl sense) before
+`prepare_app` is called. For example, if you trust your user base you
+can provide the following middleware:
+
+    use Plack::Middleware::MangleEnv::WithEval;
+    use parent 'Plack::Middleware::MangleEnv';
+    sub ALLOW_EVAL { return 1 }
+    1;
+
+## **ALLOW\_FACTORY**
+
+    my $perl_bool = $self->ALLOW_FACTORY();
+
+this method tells you whether the _factory_ interface for subroutines is
+enabled or not.
+
+The default implementation returns `0`, i.e. a false value. This means
+that the _factory_ interface is _disabled_.
+
+Hence, to enable the _factory_ interface, you MUST override or
+monkey-patch this method to return a true value (in Perl sense) before
+`prepare_app` is called. For example, if you trust your user base you
+can provide the following middleware:
+
+    use Plack::Middleware::MangleEnv::WithFactory;
+    use parent 'Plack::Middleware::MangleEnv';
+    sub ALLOW_FACTORY { return 1 }
+    1;
+
+## Plack-related
+
+The following methods are implemented as part of the interface for a
+Plack middleware.
+
+- call
+- prepare\_app
+
+# SECURITY
+
+This module contains code (in subs `__sub_from_eval` and
+`__sub_from_factory`) that can eventually lead to either an `eval` or
+to loading an arbitrary module. This code is disabled by default, but
+this is not as if the code were not there.
+
+Enabling either of `eval` and _factory_ interfaces requires an
+attacker to be able to either monkey-patch
+["ALLOW\_EVAL"](#allow_eval)/["ALLOW\_FACTORY"](#allow_factory) in the main module, or to generate a
+subclass where these method are overridden to provide a true value back.
+Another way is to call `__sub_from_eval` and/or `__sub_from_factory`
+directly. The ["AUTHOR"](#author) is not aware of other ways to trigger that code.
+
+If your attacker is able to do that, this module isn't likely to add
+more capabilities because they already have anything needed anyway. For
+example, they might substitute `prepare_app` instead and put arbitrary
+code there, or if they can call `__sub_from_eval` they might just be
+able to call `eval` directly by themselves.
+
+Anyway this consideration is NOT based on a thorough analysis, so there
+can be corner cases where this situation might actually open further
+doors.  For example, there might be different ways to substitute
+["ALLOW\_EVAL"](#allow_eval)/["ALLOW\_FACTORY"](#allow_factory) that the ["AUTHOR"](#author) is not aware of,
+whereas these ways might not be applicable to substituting
+`prepare_app` or something different instead. Or they might manage to
+call `__sub_from_eval` (or `__sub_from_factory`) in other ways.
+
+If you're unsure about it, you can:
+
+- perform a thorough assessment of the code, possibly supported by a
+security and Perl expert, until you're fine with it, OR
+- remove the code you're not comfortable with (look for `__sub_from_eval`
+and `__sub_from_factory`), OR
+- NOT use this module.
+
+Whatever you choose to do, it will be YOUR choice!
 
 # BUGS AND LIMITATIONS
 

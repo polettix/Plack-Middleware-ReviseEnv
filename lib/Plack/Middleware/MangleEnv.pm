@@ -8,6 +8,9 @@ use English qw< -no_match_vars >;
 
 use parent 'Plack::Middleware';
 
+sub ALLOW_EVAL { return 0; }
+sub ALLOW_FACTORY { return 0; }
+
 # Note: manglers in "manglers" here are totally reconstructured and not
 # necessarily straightly coming from the "mangle" field in the original
 sub call {
@@ -214,8 +217,10 @@ sub _generate_sub {
 
    my $sr = ref $spec;
    return $spec if $sr eq 'CODE';
-   return __sub_from_eval($key, $spec) unless $sr;
-   return __sub_from_factory($key, ref($self), @$spec) if $sr eq 'ARRAY';
+   return __sub_from_eval($key, $spec)
+     if $self->ALLOW_EVAL() && !$sr;
+   return __sub_from_factory($key, ref($self), @$spec)
+     if $self->ALLOW_FACTORY() && $sr eq 'ARRAY';
 
    confess "invalid type for sub: $sr";
 } ## end sub _generate_sub

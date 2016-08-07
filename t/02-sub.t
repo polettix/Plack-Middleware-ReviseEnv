@@ -20,22 +20,31 @@ my $app = sub {
    ];
 };
 
+# enable EVAL and FACTORY
+use Plack::Middleware::MangleEnv;
+{
+   no strict 'refs';
+   *Plack::Middleware::MangleEnv::ALLOW_EVAL = sub { return 1 };
+   *Plack::Middleware::MangleEnv::ALLOW_FACTORY = sub { return 1 };
+}
+
+
 $app = builder {
    enable 'MangleEnv', 'psgi.url_scheme' => sub {
       my $env = $_[1];
       my ($scheme) = $env->{test_base} =~ m{\A(\w+)://}mxs;
       return $scheme;
-     },
-     what => {
+   },
+   what => {
       sub => sub { return 'ever' }
-     },
-     ever => {sub => 'sub {return uc(shift)}'},
-     ohmy => {sub => ['TestPackage::factory']},
-     omg  => {sub => [ref_to => 'TestPackage::mangler']},
-     rogue => sub {
+   },
+   ever => {sub => 'sub {return uc(shift)}'},
+   ohmy => {sub => ['TestPackage::factory']},
+   omg  => {sub => [ref_to => 'TestPackage::mangler']},
+   rogue => sub {
       $_[1]->{side} = 'effect';
       return;
-     };
+   };
    $app;
 };
 

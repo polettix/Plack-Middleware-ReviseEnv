@@ -342,10 +342,54 @@ found in C<$target>.
 It uses C<require> to load the package, so if your package is a
 sub-package inside a differently-named file you're out of luck.
 
-=begin COMMENTED
 
-The following items are not documented because they are not supposed to
-be used.
+=head1 METHODS
+
+=head2 B<< ALLOW_EVAL >>
+
+   my $perl_bool = $self->ALLOW_EVAL();
+
+this method tells you whether the C<eval> interface for subroutines is
+enabled or not.
+
+The default implementation returns C<0>, i.e. a false value. This means
+that the C<eval> interface is I<disabled>.
+
+Hence, to enable the C<eval> interface, you MUST override or
+monkey-patch this method to return a true value (in Perl sense) before
+C<prepare_app> is called. For example, if you trust your user base you
+can provide the following middleware:
+
+   use Plack::Middleware::MangleEnv::WithEval;
+   use parent 'Plack::Middleware::MangleEnv';
+   sub ALLOW_EVAL { return 1 }
+   1;
+
+
+=head2 B<< ALLOW_FACTORY >>
+
+   my $perl_bool = $self->ALLOW_FACTORY();
+
+this method tells you whether the I<factory> interface for subroutines is
+enabled or not.
+
+The default implementation returns C<0>, i.e. a false value. This means
+that the I<factory> interface is I<disabled>.
+
+Hence, to enable the I<factory> interface, you MUST override or
+monkey-patch this method to return a true value (in Perl sense) before
+C<prepare_app> is called. For example, if you trust your user base you
+can provide the following middleware:
+
+   use Plack::Middleware::MangleEnv::WithFactory;
+   use parent 'Plack::Middleware::MangleEnv';
+   sub ALLOW_FACTORY { return 1 }
+   1;
+
+=head2 Plack-related
+
+The following methods are implemented as part of the interface for a
+Plack middleware.
 
 =over
 
@@ -355,8 +399,56 @@ be used.
 
 =back
 
-=end COMMENTED
 
+=head1 SECURITY
+
+This module contains code (in subs C<__sub_from_eval> and
+C<__sub_from_factory>) that can eventually lead to either an C<eval> or
+to loading an arbitrary module. This code is disabled by default, but
+this is not as if the code were not there.
+
+Enabling either of C<eval> and I<factory> interfaces requires an
+attacker to be able to either monkey-patch
+L</ALLOW_EVAL>/L</ALLOW_FACTORY> in the main module, or to generate a
+subclass where these method are overridden to provide a true value back.
+Another way is to call C<__sub_from_eval> and/or C<__sub_from_factory>
+directly. The L</AUTHOR> is not aware of other ways to trigger that code.
+
+If your attacker is able to do that, this module isn't likely to add
+more capabilities because they already have anything needed anyway. For
+example, they might substitute C<prepare_app> instead and put arbitrary
+code there, or if they can call C<__sub_from_eval> they might just be
+able to call C<eval> directly by themselves.
+
+Anyway this consideration is NOT based on a thorough analysis, so there
+can be corner cases where this situation might actually open further
+doors.  For example, there might be different ways to substitute
+L</ALLOW_EVAL>/L</ALLOW_FACTORY> that the L</AUTHOR> is not aware of,
+whereas these ways might not be applicable to substituting
+C<prepare_app> or something different instead. Or they might manage to
+call C<__sub_from_eval> (or C<__sub_from_factory>) in other ways.
+
+If you're unsure about it, you can:
+
+=over
+
+=item *
+
+perform a thorough assessment of the code, possibly supported by a
+security and Perl expert, until you're fine with it, OR
+
+=item *
+
+remove the code you're not comfortable with (look for C<__sub_from_eval>
+and C<__sub_from_factory>), OR
+
+=item *
+
+NOT use this module.
+
+=back
+
+Whatever you choose to do, it will be YOUR choice!
 
 =head1 BUGS AND LIMITATIONS
 

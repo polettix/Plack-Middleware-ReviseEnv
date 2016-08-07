@@ -130,7 +130,7 @@ sub _add_array_mangler {
    return;
 }
 
-sub _wrapsub_mangler {
+sub __wrapsub_mangler {
    my ($sub) = @_;
    return sub {
       my ($value, $env, $key) = @_;
@@ -154,7 +154,7 @@ sub _add_wrapsub_mangler {
    my ($self, $key, $sub, $override) = @_;
    push @{$self->{_manglers}}, [
       $key => {
-         wrapsub => _wrapsub_mangler($sub),
+         wrapsub => __wrapsub_mangler($sub),
          override => $override,
       }
    ];
@@ -172,16 +172,57 @@ sub __exactly_one_key_among {
      : "only one in ('@keys') is allowed, found ('@found')";
 }
 
+sub _add_remover {
+   my ($self, $key, $hash) = @_;
+   if ($hash && (my @keys = keys(%$hash))) {
+      local $" = "', '";
+      confess "remove MUST be alone when set to true, found ('@keys')"
+   }
+   push @{$self->{_manglers}}, [$key, {remove => 1}];
+   return;
+}
+
+sub __sub_from_eval {
+   my ($key, $value) = @_;
+   my $retval = eval $value;
+   return $retval if ref($retval) eq 'CODE';
+
+   my $error = $EVAL_ERROR || 'uknown error';
+   confess "error in sub for '$key': $error, with definition:\n$value";
+}
+
+sub __sub_from_factory {
+   my ($key, $default_package, $factory, @params) = @_;
+
+   my $factory_sub = ref_to($factory, $default_package);
+   confess "invalid factory '$factory' for '$key'"
+     unless ref($factory_sub) eq 'CODE';
+
+   my $retval = $factory_sub->(@params);
+   if (ref($retval) ne 'CODE') {
+      local $" = "', '";
+      confess "invalid sub for '$key' ('$factory' with ('@params'))";
+   }
+
+   return $retval;
+}
+
+sub _generate_sub {
+   my ($self, $key, $spec) = @_;
+
+   my $sr = ref $spec;
+   return $spec if $sr eq 'CODE';
+   return __sub_from_eval($key, $spec) unless $sr;
+   return __sub_from_factory($key, ref($self), @$spec) if $sr eq 'ARRAY';
+
+   confess "invalid type for sub: $sr";
+}
+
 sub _add_hash_mangler {
    my ($self, $key, $hash, $default_override) = @_;
    my $manglers = $self->{_manglers};
 
-   if (delete($hash->{remove})) {
-      confess "remove MUST be alone when set to true"
-         if keys(%$hash) > 1;
-      push @$manglers, [$key, {remove => 1}];
-      return;
-   }
+   return $self->_add_remover($key, $hash) if delete $hash->{remove};
 
    my $type = __exactly_one_key_among($hash, qw< env ENV sub value >);
    my $value = delete $hash->{$type};
@@ -195,31 +236,11 @@ sub _add_hash_mangler {
       confess "unknown keys ('@residual') in '$key'";
    }
 
-   if ($type ne 'sub') { # quick one, just keep what's available
-      push @$manglers, [$key => {$type => $value, override => $override}];
-      return;
-   }
+   # subs must be generated and wrapped
+   ($type, $value) = (wrapsub => __wrapsub_mangler($self->_generate_sub($key, $value)))
+      if $type eq 'sub';
 
-   my $sr = ref $value;
-   if (!$sr) { # string of text, eval it
-      $value = eval $value;
-      if (ref($value) ne 'CODE') {
-         my $error = $EVAL_ERROR || 'uknown error';
-         confess "error in sub for '$key': $error";
-      }
-   } ## end elsif (!$sr)
-   elsif ($sr eq 'ARRAY') {
-      my ($factory, @params) = @$value;
-      $factory = ref_to($factory, ref($self));
-      confess "invalid factory for '$key'" unless ref($factory) eq 'CODE';
-      $value = $factory->(@params);
-      confess "invalid sub for '$key'" unless ref($value) eq 'CODE';
-   } ## end elsif ($sr eq 'ARRAY')
-   elsif ($sr ne 'CODE') {
-      confess "invalid type for sub: $sr";
-   }
-
-   $self->_add_wrapsub_mangler($key, $value, $override);
+   push @$manglers, [$key => {$type => $value, override => $override}];
    return;
 }
 

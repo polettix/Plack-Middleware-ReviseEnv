@@ -174,6 +174,82 @@ to a key:
         points to a string that will be used to extract the value from `%ENV`.
         Useful if you want to get some variables from the environment.
 
+    - `list`
+
+        points to a hash of configurations to build and handle a list of other
+        _sources_ (i.e. `env`, `ENV` or `value`).
+
+        It collects data from a list of `sources`, optionally `flatten`inig
+        them (if they are array or hash references), filtering them (e.g. to set
+        default values for `undef` or empty strings, or removing unwanted
+        elements), then optionally `join`inig them or passing them to
+        `sprintf`. See ["generate\_hash\_manglers\_list"](#generate_hash_manglers_list) for the details on this
+        hash and of each element in `sources`.
+
+        For example, consider the following definition:
+
+            ...
+            connect_string => {
+               list => {
+                  default => [], # remove undefined values
+                  join => ':',   # join with ":"
+                  sources => [
+                     {ENV => 'HOST'},
+                     {ENV => 'PORT'}
+                  ],
+               }
+            }
+            ...
+
+        The following applies:
+
+            %ENV = (HOST => 'localhost'); # leave PORT undefined
+            --> $env->{connect_string} = 'localhost';
+
+            %ENV = (HOST => 'localhost', PORT => 80);
+            --> $env->{connect_string} = 'localhost:80';
+
+        Something similar happens with `sprintf`, although the format is
+        stricter in this case and we have to address this with defaults:
+
+            ...
+            connect_string => {
+               list => {
+                  default => [], # remove undefined values
+                  sprintf => '%s:%s',
+                  sources => [
+                     {ENV => 'HOST', default => 'www.example.com'},
+                     {ENV => 'PORT', default => 80},
+                  ],
+               }
+            }
+            ...
+
+            %ENV = ();
+            --> $env->{connect_string} = 'www.example.com:80';
+
+            %ENV = (HOST => 'localhost', PORT => 443);
+            --> $env->{connect_string} = 'localhost:443';
+
+        In addition to plain strings, you can also set either `join` or
+        `sprintf` (never the two at the same time!) with a _source_
+        specification with `env`, `ENV` or `value`:
+
+            ...
+            sprintf_template => '%s:%s', # ends up in $env
+            connect_string => {
+               list => {
+                  default => [], # remove undefined values
+                  sprintf => {env => 'sprintf_template'},
+                  sources => [
+                     {ENV => 'HOST', default => 'www.example.com'},
+                     {ENV => 'PORT', default => 80},
+                  ],
+               }
+            }
+            ...
+            # same as before here
+
     - `override`
 
         boolean flag that indicates whether the new value overrides a previous
@@ -195,14 +271,14 @@ to a key:
             key => { value => [1..3] },
 
             # set key to a hash reference, literally
-            key => { value => { a => 'b', c => 'd' } }, # note: hash in hash!
+            key => { value => { a => 'b', c => 'd' } },
 
             # set key to a sub reference, literally
             key => { value => sub { 'I go with key!' } },
 
-    Exactly one of the keys `env`, `ENV`, `sub` and `value` MUST appear
-    in the hash reference. For obvious reasons, you cannot provide more of
-    them, otherwise a conflict would arise.
+    Exactly one of the keys `env`, `ENV`, `list`, `sub` and `value`
+    MUST appear in the hash reference. For obvious reasons, you cannot
+    provide more of them, otherwise a conflict would arise.
 
 ## Sub Reference Interface
 
@@ -268,7 +344,7 @@ an `ARRAY` reference. Depending on the number of elements in `@$aref`:
 - if no element is present, a _remove_ mangler is generated via
 ["generate\_remove\_manglers"](#generate_remove_manglers)
 - if exactly one element is present, a _value_ mangler is generated via
-["generate\_value\_manglers"](#generate_value_manglers)
+["generate\_immediate\_manglers"](#generate_immediate_manglers) with type `value`
 - otherwise, an exception is thrown.
 
 ## **generate\_code\_manglers**
@@ -365,7 +441,8 @@ Same as ["generate\_code\_manglers"](#generate_code_manglers).
 
 ## **generate\_hash\_manglers\_value**
 
-    my @manglers = $obj->generate_hash_manglers_value($key, $value, $opts);
+    my @manglers =
+      $obj->generate_hash_manglers_value($key, $value, $opts);
 
 generate mangler for taking `$value`.
 
@@ -398,7 +475,7 @@ value can contain any number of items.
 
 This method does the following dispatching based on `ref($value)`:
 
-- non-reference scalars: ["generate\_value\_manglers"](#generate_value_manglers)
+- non-reference scalars: ["generate\_immediate\_manglers"](#generate_immediate_manglers) with type `value`
 - array references: ["generate\_array\_manglers"](#generate_array_manglers)
 - hash references: ["generate\_hash\_manglers"](#generate_hash_manglers)
 - code references: ["generate\_code\_manglers"](#generate_code_manglers)
@@ -434,7 +511,8 @@ the following example:
 
 ## **generate\_remove\_manglers**
 
-    my @manglers = $obj->generate_remove_manglers($key, $value, $defaults);
+    my @manglers =
+      $obj->generate_remove_manglers($key, $value, $defaults);
 
 convenience function to generate manglers for removing. Such manglers
 are supposed to have this form:
@@ -451,7 +529,7 @@ are no further keys in the input mangler definition).
     my @values = $obj->get_values_from_source($env, $spec);
 
 runtime helper that expands the `$spec` according to the rules
-explained in ["generate\_hash\_mangler\_list"](#generate_hash_mangler_list) for each source.
+explained in ["generate\_hash\_manglers\_list"](#generate_hash_manglers_list) for each source.
 
 ## **normalize\_source**
 

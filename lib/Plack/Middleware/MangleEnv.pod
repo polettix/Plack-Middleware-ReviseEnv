@@ -153,17 +153,27 @@ a I<non-reference> scalar is always taken as-is and then set in C<$env>.
 
 when you pass an array reference, it can be either empty (in which case
 the associated key will be I<removed> from C<$env>) or contain exactly
-one value, which will be set into C<$env>. This alternative allows you
-to pass any scalar, not just non-reference ones.
+one value, which will be set into C<$env>.
+
+This alternative allows you to pass any scalar, not just non-reference
+ones; so the following examples will do what they say:
+
+   # set key to an array ref with numbers 1..3 inside
+   key => [ [1..3] ], # note: array ref inside array ref!
+
+   # set key to a hash reference, literally
+   key => [ { a => 'b', c => 'd' } ],
+
+   # set key to a sub reference, literally
+   key => [ sub { 'I go with key!' } ],
 
 =item B<< Sub reference >>
 
    key => sub { ... },
 
-the sub reference will be called for each C<$env> and its return value
-used to figure out the value to associate to the key. See
-L</Sub Reference Interface> for details on the expected interface for
-the sub;
+the sub reference will be called and its return value used to figure out
+the value to associate to the key. See L</Sub Reference Interface> for
+details on the expected interface for the sub;
 
 =item B<< Hash reference >>
 
@@ -211,6 +221,18 @@ See L</Sub Reference Interface> for details;
 
 Can not appear together with either C<env> or C<ENV>, for obvious
 reasons.
+
+This is an alternative way to set a value that is not a simple plain
+scalar:
+
+   # set key to an array ref with numbers 1..3 inside
+   key => { value => [1..3] },
+
+   # set key to a hash reference, literally
+   key => { value => { a => 'b', c => 'd' } }, # note: hash in hash!
+
+   # set key to a sub reference, literally
+   key => { value => sub { 'I go with key!' } },
 
 =back
 
@@ -303,32 +325,7 @@ For example, suppose that you have a fancy reverse-proxy setup where you
 need to override some values in order to make your web toolkit happy
 (e.g. L<Dancer> or L<Mojolicious>).
 
-One example scenario might be the following:
-
-=over
-
-=item *
-
-you want to use L<Docker|https://www.docker.com/> to easily encapsulate
-your services
-
-=item *
-
-you want to put a front-end reverse proxy, e.g.
-L<nginx|http://nginx.org/>
-
-=item *
-
-you would like to spread configurations as little as possible.
-
-=back
-
-If you plan to use C<docker-compose>, you can concentrate most of the
-configurations inside the C<docker-compose.yml> file as environment
-variables that will be available to your mounted services, so that you
-can e.g. adapt to the actual front-end you will be serving for without
-chaning your application's configuration files.
-
+The example scenario will be detailed in a later stage!
 
 =head1 FUNCTIONS
 

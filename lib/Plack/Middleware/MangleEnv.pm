@@ -8,9 +8,6 @@ use English qw< -no_match_vars >;
 
 use parent 'Plack::Middleware';
 
-sub ALLOW_EVAL { return 0; }
-sub ALLOW_FACTORY { return 0; }
-
 # Note: manglers in "manglers" here are totally reconstructured and not
 # necessarily straightly coming from the "mangle" field in the original
 sub call {
@@ -78,20 +75,6 @@ sub prepare_app {
 
    return $self;
 } ## end sub prepare_app
-
-sub ref_to {
-   my ($target,  $default_package) = @_;
-   my ($package, $name)            = $target =~ m{\A (.*) :: (.*)\z}mxs;
-   if (defined $package) {
-      (my $path = $package . '.pm') =~ s{::}{/}gmxs;
-      require $path;
-   }
-   else {
-      $package = defined($default_package) ? $default_package : 'CORE';
-      $name = $target;
-   }
-   return $package->can($name);
-} ## end sub ref_to
 
 # _PRIVATE METHODS_
 
@@ -188,44 +171,6 @@ sub _add_remover {
    return;
 } ## end sub _add_remover
 
-sub __sub_from_eval {
-   my ($key, $value) = @_;
-   my $retval = eval $value;
-   return $retval if ref($retval) eq 'CODE';
-
-   my $error = $EVAL_ERROR || 'uknown error';
-   confess "error in sub for '$key': $error, with definition:\n$value";
-} ## end sub __sub_from_eval
-
-sub __sub_from_factory {
-   my ($key, $default_package, $factory, @params) = @_;
-
-   my $factory_sub = ref_to($factory, $default_package);
-   confess "invalid factory '$factory' for '$key'"
-     unless ref($factory_sub) eq 'CODE';
-
-   my $retval = $factory_sub->(@params);
-   if (ref($retval) ne 'CODE') {
-      local $" = "', '";
-      confess "invalid sub for '$key' ('$factory' with ('@params'))";
-   }
-
-   return $retval;
-} ## end sub __sub_from_factory
-
-sub _generate_sub {
-   my ($self, $key, $spec) = @_;
-
-   my $sr = ref $spec;
-   return $spec if $sr eq 'CODE';
-   return __sub_from_eval($key, $spec)
-     if $self->ALLOW_EVAL() && !$sr;
-   return __sub_from_factory($key, ref($self), @$spec)
-     if $self->ALLOW_FACTORY() && $sr eq 'ARRAY';
-
-   confess "invalid type for sub: $sr";
-} ## end sub _generate_sub
-
 sub _add_hash_mangler {
    my ($self, $key, $hash, $default_override) = @_;
    my $manglers = $self->{_manglers};
@@ -245,10 +190,12 @@ sub _add_hash_mangler {
       confess "unknown keys ('@residual') in '$key'";
    }
 
-   # subs must be generated and wrapped
-   ($type, $value) =
-     (wrapsub => __wrapsub_mangler($self->_generate_sub($key, $value)))
-     if $type eq 'sub';
+   if ($type eq 'sub') {
+      confess "sub for '$key' is not a CODE reference"
+        unless ref($value) eq 'CODE';
+      $type = 'wrapsub';
+      $value = __wrapsub_mangler($value);
+   }
 
    push @$manglers, [$key => {$type => $value, override => $override}];
    return;

@@ -305,16 +305,6 @@ generate mangler for taking `$ENV{$name}`.
 
 generate mangler for taking `$env-`{$name}>.
 
-## **generate\_hash\_manglers\_join**
-
-    my @manglers = $obj->generate_hash_manglers_join($key, $src, $opts);
-
-generate mangler for joining values together. `$name` is the
-specification of a source according to the same rules of a single source
-for ["generate\_hash\_manglers\_list"](#generate_hash_manglers_list) (with the exception that `flatten`
-is always considered true); the resulting list will be fed to
-`CORE::join`.
-
 ## **generate\_hash\_manglers\_list**
 
     my @manglers = $obj->generate_hash_manglers_env($key, $cfg, $opts);
@@ -339,6 +329,13 @@ configuration `%$cfg`. The following keys are supported:
 - `flatten`
 
     boolean, turn array reference values into a list. Defaults to 0;
+
+- `join`
+
+    specification of a _source_ (see below for the _source specification_
+    provided for key `sources`) where it's possible to take a string for
+    joining the elements of the list together. In this case, a single string
+    will be returned.
 
 - `remove_if`
 

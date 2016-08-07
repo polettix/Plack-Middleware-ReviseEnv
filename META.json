@@ -53,7 +53,7 @@
          }
       }
    },
-   "release_status" : "stable",
+   "release_status" : "testing",
    "version" : "0.001",
    "x_contributors" : [
       "Flavio Poletti <flavio@polettix.it>"

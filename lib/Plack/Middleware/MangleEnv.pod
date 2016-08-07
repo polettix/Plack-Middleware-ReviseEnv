@@ -37,8 +37,8 @@ This document describes Plack::Middleware::MangleEnv version {{[ version
       # turn override into defaulting, works with value, env and ENV
       de_fault    => { value => $something, override => 0 },
 
-      # get rid of a variable, inconditionally. You can pass "no value"
-      # or be explicit about your intent
+      # get rid of a variable, inconditionally. You can pass
+      # no value or be explicit about your intent
       delete_pliz => [],
       delete_me   => { remove => 1 },
 
@@ -49,8 +49,8 @@ This document describes Plack::Middleware::MangleEnv version {{[ version
    );
 
    # you can also pass the key/value pairs as a hash reference
-   # associated to a key named 'manglers'. This is necessary if you want
-   # e.g. to set a variable in $env with name 'app' (or 'manglers'
+   # associated to a key named 'manglers'. This is necessary e.g. if
+   # you want to set a variable in $env with name 'app' (or 'manglers'
    # itself)
    my $mw2 = Plack::Middleware::MangleEnv->new(
       manglers => {
@@ -356,10 +356,112 @@ follows:
    my @manglers = $obj->generate_hash_manglers($key, $hash, $defaults);
 
 generate manglers from a hash definition. C<$hash> MUST be a C<HASH>
-reference.
+reference. This is actually a dispatcher for the different methods named
+C<generate_hash_manglers_*>, which can be overridden or added in derived
+classes to support further conversion types.
 
-This sub applies the procedure exposed in the L</DESCRIPTION> and it
-will not be repeated here.
+=head2 B<< generate_hash_manglers_ENV >>
+
+   my @manglers = $obj->generate_hash_manglers_ENV($key, $name, $opts);
+
+generate mangler for taking C<$ENV{$name}>.
+
+=head2 B<< generate_hash_manglers_env >>
+
+   my @manglers = $obj->generate_hash_manglers_env($key, $name, $opts);
+
+generate mangler for taking C<$env->{$name}>.
+
+=head2 B<< generate_hash_manglers_list >>
+
+   my @manglers = $obj->generate_hash_manglers_env($key, $cfg, $opts);
+
+generate mangler for generating a list of elements from hash
+configuration C<%$cfg>. The following keys are supported:
+
+=over
+
+=item C<default>
+
+a default value to assign if the source element is not present or has an
+undefined value. If it is an array reference, it follows the same rules
+explained at L</Array reference>. If an item in C<sources> has a
+C<default> configuration, that takes precedence. If not present, the
+same as setting C<[]> is assumed (i.e. undefined values will be
+removed).
+
+=item C<default_on_empty>
+
+boolean, apply the C<default> above to empty values too, in addition to
+undefined values. Defaults to 0;
+
+=item C<flatten>
+
+boolean, turn array reference values into a list. Defaults to 0;
+
+=item C<join>
+
+specification of a I<source> (see below for the I<source specification>
+provided for key C<sources>) where it's possible to take a string for
+joining the elements of the list together. In this case, a single string
+will be returned.
+
+=item C<remove_if>
+
+array reference to strings that will be removed when found;
+
+=item C<sources>
+
+array reference of hashes, explained below.
+
+=back
+
+The different source specifications in C<sources> can take all the keys
+above as an overriding specialization (with the exception of
+C<sources>), and the following additional ones:
+
+=over
+
+=item C<env>
+
+=item C<ENV>
+
+=item C<value>
+
+mutually exclusive keys indicating where the value should be taken from.
+
+=back
+
+=head2 B<< generate_hash_manglers_remove >>
+
+Same as L</generate_remove_manglers>.
+
+=head2 B<< generate_hash_manglers_sprintf >>
+
+
+=head2 B<< generate_hash_manglers_sub >>
+
+Same as L</generate_code_manglers>.
+
+=head2 B<< generate_hash_manglers_value >>
+
+   my @manglers = $obj->generate_hash_manglers_value($key, $value, $opts);
+
+generate mangler for taking C<$value>.
+
+=head2 B<< generate_immediate_manglers >>
+
+   my @manglers =
+     $obj->generate_immediate_manglers($type, $key, $value, $opts);
+
+generates this mangler:
+
+   [$key => {%$opts, $type => $value}]
+
+i.e. the standard mangler for setting something immediately handled.
+
+Note that this has the initial value for C<$type>, differently from
+other C<generate*_manglers> functions.
 
 =head2 B<< generate_manglers >>
 
@@ -442,15 +544,25 @@ that C<$value> is empty if it is a hash reference (it is used by
 L</generate_hash_manglers> behind the scenes, so this checks that there
 are no further keys in the input mangler definition).
 
-=head2 B<< generate_value_manglers >>
+=head2 B<< get_values_from_source >>
 
-   my @manglers = $obj->generate_value_manglers($key, $value, $defaults);
+   my @values = $obj->get_values_from_source($env, $spec);
 
-generates this mangler:
+runtime helper that expands the C<$spec> according to the rules
+explained in L</generate_hash_mangler_list> for each source.
 
-   [$key => {%$defaults, value => $value}]
+=head2 B<< normalize_source >>
 
-i.e. the standard mangler for setting a straight value.
+   my $normal = $obj->normalize_source($source, $defaults);
+
+normalizes a source (see L</generate_hash_manglers_list>) turning the
+pair with key C<env>, C<ENV> or C<value> into two pair, one with key
+C<type> and another one with key C<value>. Example:
+
+   { env => 'whatever' }  -->  { type => 'env', value => 'whatever' }
+
+Values for options (e.g. C<default>, C<default_on_empty>, etc.) are
+taken from hash reference C<$source> and, if absent, from C<$defaults>.
 
 =head2 B<< push_manglers >>
 
@@ -490,7 +602,7 @@ is rendered as the string C<undef> (without quoting).
 
 =head2 B<< wrap_code >>
 
-   my $wrapped_sub = $obj->wrap_code($key, $sub);
+   my $wrapped_sub = $obj->wrap_code($sub);
 
 wrap a code sub adhering to the L</Sub Reference Interface> to implement
 the behaviour described in the same subsection. It is used by both
@@ -505,8 +617,9 @@ Report bugs either through RT or GitHub (patches welcome).
 =head1 SEE ALSO
 
 L<Plack>, L<Plack::Middleware::ForceEnv>,
-L<Plack::Middleware::SetLocalEnv>,
-L<Plack::Middleware::SetEnvFromHeader>.
+L<Plack::Middleware::ReverseProxy>,
+L<Plack::Middleware::SetEnvFromHeader>,
+L<Plack::Middleware::SetLocalEnv>.
 
 =head1 AUTHOR
 

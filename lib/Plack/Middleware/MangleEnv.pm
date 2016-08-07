@@ -31,8 +31,8 @@ sub call {
       elsif (exists $value->{ENV}) {      # copy from %ENV
          $env->{$key} = $ENV{$value->{ENV}};
       }
-      elsif (exists $value->{wrapsub}) {
-         $value->{wrapsub}->($env->{$key}, $env, $key);
+      elsif (exists $value->{sub}) {
+         $value->{sub}->($env->{$key}, $env, $key);
       }
       else {
          require Data::Dumper;
@@ -72,7 +72,7 @@ sub generate_manglers { # simple dispatch method
    my $self = shift;
    my ($key, $value) = @_; # ignoring rest of parameters here
    my $ref  = ref $value;
-   return $self->generate_value_manglers(@_) unless $ref;
+   return $self->generate_immediate_manglers(value => @_) unless $ref;
    return $self->generate_array_manglers(@_) if $ref eq 'ARRAY';
    return $self->generate_hash_manglers(@_)  if $ref eq 'HASH';
    return $self->generate_code_manglers(@_)  if $ref eq 'CODE';
@@ -80,16 +80,16 @@ sub generate_manglers { # simple dispatch method
    confess "invalid reference '$ref' for '$key'";
 } ## end sub generate_manglers
 
-sub generate_value_manglers {
-   my ($self, $key, $value, $defaults) = @_;
-   return [$key => {%$defaults, value => $value}];
+sub generate_immediate_manglers {
+   my ($self, $type, $key, $value, $opts) = @_;
+   return [$key => {%$opts, $type => $value}];
 }
 
 sub generate_array_manglers {
    my ($self, $key, $aref, $defaults) = @_;
    return $self->generate_remove_manglers($key, undef, $defaults)
      if @$aref == 0;
-   return $self->generate_value_manglers($key, $aref->[0], $defaults)
+   return $self->generate_immediate_manglers(value => $key, $aref->[0], $defaults)
       if @$aref == 1;
 
    my @values = $self->stringified_list(@$aref);
@@ -97,31 +97,147 @@ sub generate_array_manglers {
 }
 
 sub generate_code_manglers {
-   my ($self, $key, $sub, $defaults) = @_;
-   $sub = $self->wrap_code($key, $sub);
-   return [$key => {%$defaults, wrapsub => $sub}];
+   my ($self, $key, $sub, $opts) = @_;
+   $sub = $self->wrap_code($sub)
+     or confess "sub for '$key' is not a CODE reference";
+   return $self->generate_immediate_manglers(sub => $key, $sub, $opts);
 }
 
 sub generate_hash_manglers {
    my ($self, $key, $hash, $defaults) = @_;
 
-   return $self->generate_remove_manglers($key, $hash, $defaults)
-     if delete $hash->{remove};
-
-   my ($type, $value) = $self->_only_one($hash, qw< env ENV sub value >);
-
    my %opt = %$defaults;
    $opt{override} = delete($hash->{override}) if exists($hash->{override});
 
-   if (my @residual = keys %$hash) {
-      @residual = $self->stringified_list(@residual);
-      confess "unknown keys ('@residual') in '$key'";
+   if ((my @keys = keys %$hash) > 1) {
+      @keys = $self->stringified_list(@keys);
+      confess "too many options ('@keys') for '$key'";
    }
 
-   ($type, $value) = (wrapsub => $self->wrap_code($key, $value))
-     if $type eq 'sub';
+   my ($type, $value) = %$hash;
+   my $cb = $self->can('generate_hash_manglers_' . $type)
+     or confess "unknown option '$type' for '$key'";
 
-   return [$key => {%opt, $type => $value}];
+   return $cb->($self, $key, $value, \%opt);
+}
+
+sub generate_hash_manglers_ENV {
+   my $self = shift;
+   return $self->generate_immediate_manglers(ENV => @_);
+}
+
+sub generate_hash_manglers_env {
+   my $self = shift;
+   return $self->generate_immediate_manglers(env => @_);
+}
+
+sub get_values_from_source {
+   my ($self, $env, $source) = @_;
+
+   # get right start value
+   my ($type, $sel) = @{$source}{qw< type value >};
+   my $svalue = ($type eq 'env') ? $env->{$sel}
+      : ($type eq 'ENV') ? $ENV{$sel}
+      : $sel;
+
+   # flatten if requested and possible
+   my @values = ($svalue);
+   if ($source->{flatten}) {
+      if (ref($svalue) eq 'ARRAY') {
+         @values = @$svalue;
+      }
+      elsif (ref($svalue) eq 'HASH') {
+         @values = %$svalue;
+      }
+   }
+
+   # handle undefined values
+   my $default = $source->{default};
+   my $doe = $source->{default_on_empty};
+   @values = map {
+      (! defined($_))            ? @$default
+      : ($doe && (! length($_))) ? @$default
+      :                            $_;
+   } @values;
+
+   # filter stuff out
+   my $remove_if = $source->{remove_if};
+   my @retval = grep { ref($_) || (! $remove_if->{$_}) } @values;
+   return unless @retval;
+
+   # join if requested
+   my $join = $source->{join};
+   if (defined $join) {
+      my ($joinstr) = $self->get_values_from_source($env, $join);
+      return join $joinstr, @retval;
+   }
+
+   return @retval;
+}
+
+sub normalize_source {
+   my ($self, $source, $defaults) = @_;
+   my %src;
+   for my $feature (qw< remove_if default default_on_empty flatten join >) {
+      $src{$feature} = exists($source->{$feature})
+         ? delete($source->{$feature}) : $defaults->{$feature};
+   }
+   $src{remove_if} = { map { $_ => 1 } @{$src{remove_if}} };
+   $src{default} = [$src{default}] unless ref($src{default}) eq 'ARRAY';
+   if (defined $src{join}) {
+      $src{join} = { value => $src{join} } unless ref $src{join};
+      $src{join} = $self->normalize_source($src{join}, {%$defaults, join => undef});
+   }
+   confess "too many elements in default for list"
+      if @{$src{default}} > 1;
+   confess "too many options in list" if keys(%$source) > 1;
+   confess "nothing to take from in list" if keys(%$source) < 1;
+   ($src{type}, $src{value}) = %$source;
+   confess "unknown source '$src{type}' in list"
+      unless grep {$_ eq $src{type}} qw< env ENV value >;
+   return \%src;
+}
+
+sub generate_hash_manglers_list {
+   my ($self, $key, $cfg, $opts) = @_;
+   $cfg->{remove_if} ||= [];
+   $cfg->{default} ||= [];
+   $cfg->{default_on_empty} ||= 0;
+   $cfg->{flatten} ||= 0;
+   my $join = $cfg->{join};
+   if (defined $join) {
+      $join = { value => $join } unless ref $join;
+      $join = $self->normalize_source($join, $cfg);
+   }
+
+   my @sources = map {
+      $self->normalize_source($_, $cfg);
+   } @{$cfg->{sources}};
+
+   my $sub = sub {
+      my ($value, $env, $key) = @_;
+      my @retval;
+      for my $source (@sources) {
+         push @retval, $self->get_values_from_source($env, $source);
+      }
+
+      if (defined $join) {
+         my ($joinstr) = $self->get_values_from_source($env, $join);
+         $env->{$key} = join $joinstr, @retval;
+      }
+      else {
+         $env->{$key} = \@retval;
+      }
+   };
+   return $self->generate_immediate_manglers(sub => $key, $sub, $opts);
+}
+
+*generate_hash_manglers_remove = \&generate_remove_manglers;
+*generate_hash_manglers_sub    = \&generate_code_manglers;
+
+sub generate_hash_manglers_value {
+   my $self = shift;
+   return $self->generate_immediate_manglers(value => @_);
 }
 
 sub generate_remove_manglers {
@@ -130,13 +246,12 @@ sub generate_remove_manglers {
       @keys = $self->stringified_list(@keys);
       confess "remove MUST be alone when set to true, found (@keys)";
    }
-   return [$key, {remove => 1}]; # ignore $defaults for now
+   return $self->generate_immediate_manglers(remove => $key, 1, {});
 }
 
 sub wrap_code {
-   my ($self, $key, $sub) = @_;
-   confess "sub for '$key' is not a CODE reference"
-     unless ref($sub) eq 'CODE';
+   my ($self, $sub) = @_;
+   return unless ref($sub) eq 'CODE';
    return sub {
       defined(my $retval = $sub->(@_)) or return;
       $retval = [$retval] unless ref($retval);

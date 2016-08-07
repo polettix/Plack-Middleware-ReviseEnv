@@ -33,8 +33,8 @@ This document describes Plack::Middleware::MangleEnv version {{\[ version
        # turn override into defaulting, works with value, env and ENV
        de_fault    => { value => $something, override => 0 },
 
-       # get rid of a variable, inconditionally. You can pass "no value"
-       # or be explicit about your intent
+       # get rid of a variable, inconditionally. You can pass
+       # no value or be explicit about your intent
        delete_pliz => [],
        delete_me   => { remove => 1 },
 
@@ -45,8 +45,8 @@ This document describes Plack::Middleware::MangleEnv version {{\[ version
     );
 
     # you can also pass the key/value pairs as a hash reference
-    # associated to a key named 'manglers'. This is necessary if you want
-    # e.g. to set a variable in $env with name 'app' (or 'manglers'
+    # associated to a key named 'manglers'. This is necessary e.g. if
+    # you want to set a variable in $env with name 'app' (or 'manglers'
     # itself)
     my $mw2 = Plack::Middleware::MangleEnv->new(
        manglers => {
@@ -289,10 +289,104 @@ follows:
     my @manglers = $obj->generate_hash_manglers($key, $hash, $defaults);
 
 generate manglers from a hash definition. `$hash` MUST be a `HASH`
-reference.
+reference. This is actually a dispatcher for the different methods named
+`generate_hash_manglers_*`, which can be overridden or added in derived
+classes to support further conversion types.
 
-This sub applies the procedure exposed in the ["DESCRIPTION"](#description) and it
-will not be repeated here.
+## **generate\_hash\_manglers\_ENV**
+
+    my @manglers = $obj->generate_hash_manglers_ENV($key, $name, $opts);
+
+generate mangler for taking `$ENV{$name}`.
+
+## **generate\_hash\_manglers\_env**
+
+    my @manglers = $obj->generate_hash_manglers_env($key, $name, $opts);
+
+generate mangler for taking `$env-`{$name}>.
+
+## **generate\_hash\_manglers\_join**
+
+    my @manglers = $obj->generate_hash_manglers_join($key, $src, $opts);
+
+generate mangler for joining values together. `$name` is the
+specification of a source according to the same rules of a single source
+for ["generate\_hash\_manglers\_list"](#generate_hash_manglers_list) (with the exception that `flatten`
+is always considered true); the resulting list will be fed to
+`CORE::join`.
+
+## **generate\_hash\_manglers\_list**
+
+    my @manglers = $obj->generate_hash_manglers_env($key, $cfg, $opts);
+
+generate mangler for generating a list of elements from hash
+configuration `%$cfg`. The following keys are supported:
+
+- `default`
+
+    a default value to assign if the source element is not present or has an
+    undefined value. If it is an array reference, it follows the same rules
+    explained at ["Array reference"](#array-reference). If an item in `sources` has a
+    `default` configuration, that takes precedence. If not present, the
+    same as setting `[]` is assumed (i.e. undefined values will be
+    removed).
+
+- `default_on_empty`
+
+    boolean, apply the `default` above to empty values too, in addition to
+    undefined values. Defaults to 0;
+
+- `flatten`
+
+    boolean, turn array reference values into a list. Defaults to 0;
+
+- `remove_if`
+
+    array reference to strings that will be removed when found;
+
+- `sources`
+
+    array reference of hashes, explained below.
+
+The different source specifications in `sources` can take all the keys
+above as an overriding specialization (with the exception of
+`sources`), and the following additional ones:
+
+- `env`
+- `ENV`
+- `value`
+
+    mutually exclusive keys indicating where the value should be taken from.
+
+## **generate\_hash\_manglers\_remove**
+
+Same as ["generate\_remove\_manglers"](#generate_remove_manglers).
+
+## **generate\_hash\_manglers\_sprintf**
+
+## **generate\_hash\_manglers\_sub**
+
+Same as ["generate\_code\_manglers"](#generate_code_manglers).
+
+## **generate\_hash\_manglers\_value**
+
+    my @manglers = $obj->generate_hash_manglers_value($key, $value, $opts);
+
+generate mangler for taking `$value`.
+
+## **generate\_immediate\_manglers**
+
+    my @manglers =
+      $obj->generate_immediate_manglers($type, $key, $value, $opts);
+
+generates this mangler:
+
+    [$key => {%$opts, $type => $value}]
+
+i.e. the standard mangler for setting something immediately handled.
+
+Note that this has the initial value for `$type`, differently from
+other `generate*_manglers` functions.
 
 ## **generate\_manglers**
 
@@ -357,15 +451,25 @@ that `$value` is empty if it is a hash reference (it is used by
 ["generate\_hash\_manglers"](#generate_hash_manglers) behind the scenes, so this checks that there
 are no further keys in the input mangler definition).
 
-## **generate\_value\_manglers**
+## **get\_values\_from\_source**
 
-    my @manglers = $obj->generate_value_manglers($key, $value, $defaults);
+    my @values = $obj->get_values_from_source($env, $spec);
 
-generates this mangler:
+runtime helper that expands the `$spec` according to the rules
+explained in ["generate\_hash\_mangler\_list"](#generate_hash_mangler_list) for each source.
 
-    [$key => {%$defaults, value => $value}]
+## **normalize\_source**
 
-i.e. the standard mangler for setting a straight value.
+    my $normal = $obj->normalize_source($source, $defaults);
+
+normalizes a source (see ["generate\_hash\_manglers\_list"](#generate_hash_manglers_list)) turning the
+pair with key `env`, `ENV` or `value` into two pair, one with key
+`type` and another one with key `value`. Example:
+
+    { env => 'whatever' }  -->  { type => 'env', value => 'whatever' }
+
+Values for options (e.g. `default`, `default_on_empty`, etc.) are
+taken from hash reference `$source` and, if absent, from `$defaults`.
 
 ## **push\_manglers**
 
@@ -404,7 +508,7 @@ is rendered as the string `undef` (without quoting).
 
 ## **wrap\_code**
 
-    my $wrapped_sub = $obj->wrap_code($key, $sub);
+    my $wrapped_sub = $obj->wrap_code($sub);
 
 wrap a code sub adhering to the ["Sub Reference Interface"](#sub-reference-interface) to implement
 the behaviour described in the same subsection. It is used by both
@@ -418,8 +522,9 @@ Report bugs either through RT or GitHub (patches welcome).
 # SEE ALSO
 
 [Plack](https://metacpan.org/pod/Plack), [Plack::Middleware::ForceEnv](https://metacpan.org/pod/Plack::Middleware::ForceEnv),
-[Plack::Middleware::SetLocalEnv](https://metacpan.org/pod/Plack::Middleware::SetLocalEnv),
-[Plack::Middleware::SetEnvFromHeader](https://metacpan.org/pod/Plack::Middleware::SetEnvFromHeader).
+[Plack::Middleware::ReverseProxy](https://metacpan.org/pod/Plack::Middleware::ReverseProxy),
+[Plack::Middleware::SetEnvFromHeader](https://metacpan.org/pod/Plack::Middleware::SetEnvFromHeader),
+[Plack::Middleware::SetLocalEnv](https://metacpan.org/pod/Plack::Middleware::SetLocalEnv).
 
 # AUTHOR
 

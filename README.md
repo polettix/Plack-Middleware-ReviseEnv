@@ -38,19 +38,27 @@ This document describes Plack::Middleware::MangleEnv version {{\[ version
        delete_pliz => [],
        delete_me   => { remove => 1 },
 
-       # use subroutines for maximum flexibility. They can be strings or
-       # be loaded from modules too.
+       # use subroutines for maximum flexibility.
        change_me1  => sub { ... },
        change_me2  => { sub => sub { ... } },
-       change_me3  => { sub => 'sub { ... }' },
-       change_me4  => { sub => [$factory, @params] },
 
     );
 
-    # when evaluation order or repetition is important... use an array
-    # reference
+    # you can also pass the key/value pairs as a hash reference
+    # associated to a key named 'manglers'. This is necessary if you want
+    # e.g. to set a variable in $env with name 'app' (or 'manglers'
+    # itself)
     my $mw2 = Plack::Middleware::MangleEnv->new(
-       mangle => [
+       manglers => {
+          what => 'EVER',
+          who  => 'are you?',
+       }
+    );
+
+    # when evaluation order or repetition is important... use an array
+    # reference for 'manglers'
+    my $mw3 = Plack::Middleware::MangleEnv->new(
+       manglers => [
           same_as => 'before', # set this at the beginning...
           what => {env => 'same_as'},
           ...,
@@ -84,11 +92,20 @@ following example:
        # ... you get the idea
     );
 
-or wrap these pairs inside an array reference whose key is
-`mangle`, like in the following example:
+or wrap these pairs inside either an hash or an array reference whose
+key is `manglers`, like in the following examples:
 
-    my $mw = Plack::Middleware::MangleEnv->new(
-       mangle => [
+    my $mw_h = Plack::Middleware::MangleEnv->new(
+       manglers => {
+          var_name    => 'a simple, overriding value',
+          some_value  => [ \@whatever ],
+          alternative => { value => $whatever },
+          # ... you get the idea
+       }
+    );
+
+    my $mw_a = Plack::Middleware::MangleEnv->new(
+       manglers => [
           var_name    => 'a simple, overriding value',
           some_value  => [ \@whatever ],
           alternative => { value => $whatever },
@@ -96,16 +113,15 @@ or wrap these pairs inside an array reference whose key is
        ]
     );
 
-Although more verbose, this second approach is superior because it
-allows you to:
+Although more verbose, this last approach with an array reference is
+important because it allows you to:
 
 - define the exact order of evaluation for mangling actions;
 - define multiple actions for the same key, possibly at different stages;
-- use keys `mangle` and `app`, if you need them.
+- use keys `manglers` and `app`, if you need them.
 
 There's a wide range of possible _values_ that you can set associated
-to a key, which allow you to perform a plethora of operations. In
-particular:
+to a key:
 
 - **Simple scalar**
 
@@ -122,7 +138,7 @@ particular:
     the associated key will be _removed_ from `$env`) or contain exactly
     one value, which will be set into `$env`.
 
-    This alternative allows you to pass any scalar, not just non-reference
+    This alternative allows you to set any scalar, not just non-reference
     ones; so the following examples will do what they say:
 
         # set key to an array ref with numbers 1..3 inside
@@ -153,17 +169,10 @@ particular:
         points to a string that will be used to extract the value from `$env`
         itself. Useful if you want to _change the name_ of a parameter;
 
-        Can not appear together with either `ENV` or `value`, for obvious
-        reasons;
-
     - `ENV`
 
         points to a string that will be used to extract the value from `%ENV`.
-        Useful if you want to get some variables from the environment, e.g. see
-        ["Example Scenario"](#example-scenario).
-
-        Can not appear together with either `env` or `value`, for obvious
-        reasons;
+        Useful if you want to get some variables from the environment.
 
     - `override`
 
@@ -176,19 +185,11 @@ particular:
 
     - `sub`
 
-        set a subroutine, which can be a real sub reference, a text string
-        holding the definition (it will be `eval`ed) or an array reference with
-        pointers to a factory for the sub reference.
-
-        See ["Sub Reference Interface"](#sub-reference-interface) for details;
+        set a subroutine, see ["Sub Reference Interface"](#sub-reference-interface) for details;
 
     - `value`
 
-        Can not appear together with either `env` or `ENV`, for obvious
-        reasons.
-
-        This is an alternative way to set a value that is not a simple plain
-        scalar:
+        set a value that is not a simple plain scalar:
 
             # set key to an array ref with numbers 1..3 inside
             key => { value => [1..3] },
@@ -199,35 +200,17 @@ particular:
             # set key to a sub reference, literally
             key => { value => sub { 'I go with key!' } },
 
+    Exactly one of the keys `env`, `ENV`, `sub` and `value` MUST appear
+    in the hash reference. For obvious reasons, you cannot provide more of
+    them, otherwise a conflict would arise.
+
 ## Sub Reference Interface
 
 The most flexible way to mangle `$env` is through a subroutine. It can
 be provided either directly associated to the key, or through the `sub`
-sub-key in the hash associated to the key. In this latter case, in
-addition to providing a real sub reference, you can also pass:
+sub-key in the hash associated to the key.
 
-- a text string. This is `eval`ed and is expected to return a sub
-reference;
-- an array reference, like this:
-
-        [ 'Some::Package::factory', @parameters ]
-
-    The _factory_ function is loaded and called with the provided
-    `@parameters`, and it is expected to return a sub reference.
-
-    In case you don't fully qualify the sub for the factory, it will be
-    referred to `Plack::Middleware::MangleEnv` or whatever derived class
-    you're actually using. One useful function for this is ["ref\_to"](#ref_to), that
-    give you a reference to a sub in a package, like this:
-
-        [ ref_to => 'Some::Package::mangler' ]
-
-    In this case, it will `require` package `Some::Package` and then get a
-    reference to `mangler` inside it. Yes, this has limitations (e.g. it
-    does not allow you to load functions from embedded modules).
-
-Whatever the way, you will eventually land on a subroutine reference
-that, at the right time, will be called like this:
+The provided subroutine reference will be called like this:
 
     sub {
        my ($current_value, $env, $key) = @_;
@@ -239,8 +222,9 @@ The _sub_ can modify `$env` at will, e.g. by adding new keys or
 removing other ones based on your specific logic.
 
 If you don't return anything, or the `undef` value, the corresponding
-`$key` in `$env` will be skipped (keeping its previous value if any).
-Otherwise, you are supposed to return one single value that can be:
+`$key` in `$env` will be left untouched, keeping its previous value
+(if any).  Otherwise, you are supposed to return one single value that
+can be:
 
 - **not** an array reference, in which case it is used as the value
 associated to `$key` in `$env`;
@@ -260,116 +244,172 @@ Examples:
     # key is set to an empty array in $env
     sub { return [[]] }
 
-## Example Scenario
-
-For example, suppose that you have a fancy reverse-proxy setup where you
-need to override some values in order to make your web toolkit happy
-(e.g. [Dancer](https://metacpan.org/pod/Dancer) or [Mojolicious](https://metacpan.org/pod/Mojolicious)).
-
-The example scenario will be detailed in a later stage!
-
-# FUNCTIONS
-
-## **ref\_to**
-
-    my $sub_ref = ref_to($target, $default_package);
-    $sub_ref = ref_to('Package::my_sub');
-    $sub_ref = ref_to('other_sub', 'Package::Some');
-
-get a reference to a sub whose name is contained in `$target`,
-optionally searching it into package `$default_package` if none is
-found in `$target`.
-
-It uses `require` to load the package, so if your package is a
-sub-package inside a differently-named file you're out of luck.
-
 # METHODS
 
-## **ALLOW\_EVAL**
-
-    my $perl_bool = $self->ALLOW_EVAL();
-
-this method tells you whether the `eval` interface for subroutines is
-enabled or not.
-
-The default implementation returns `0`, i.e. a false value. This means
-that the `eval` interface is _disabled_.
-
-Hence, to enable the `eval` interface, you MUST override or
-monkey-patch this method to return a true value (in Perl sense) before
-`prepare_app` is called. For example, if you trust your user base you
-can provide the following middleware:
-
-    use Plack::Middleware::MangleEnv::WithEval;
-    use parent 'Plack::Middleware::MangleEnv';
-    sub ALLOW_EVAL { return 1 }
-    1;
-
-## **ALLOW\_FACTORY**
-
-    my $perl_bool = $self->ALLOW_FACTORY();
-
-this method tells you whether the _factory_ interface for subroutines is
-enabled or not.
-
-The default implementation returns `0`, i.e. a false value. This means
-that the _factory_ interface is _disabled_.
-
-Hence, to enable the _factory_ interface, you MUST override or
-monkey-patch this method to return a true value (in Perl sense) before
-`prepare_app` is called. For example, if you trust your user base you
-can provide the following middleware:
-
-    use Plack::Middleware::MangleEnv::WithFactory;
-    use parent 'Plack::Middleware::MangleEnv';
-    sub ALLOW_FACTORY { return 1 }
-    1;
-
-## Plack-related
-
 The following methods are implemented as part of the interface for a
-Plack middleware.
+Plack middleware. Although you can override them... there's probably
+little sense in doing this!
 
 - call
 - prepare\_app
 
-# SECURITY
+Methods described in the following subsections can be overridden or used
+in derived classes. The various `generate*_manglers` functions have the
+plural form because they can potentially return a list of manglers; in
+this module, anyway, each of them returns one single mangler per call.
 
-This module contains code (in subs `__sub_from_eval` and
-`__sub_from_factory`) that can eventually lead to either an `eval` or
-to loading an arbitrary module. This code is disabled by default, but
-this is not as if the code were not there.
+## **generate\_array\_manglers**
 
-Enabling either of `eval` and _factory_ interfaces requires an
-attacker to be able to either monkey-patch
-["ALLOW\_EVAL"](#allow_eval)/["ALLOW\_FACTORY"](#allow_factory) in the main module, or to generate a
-subclass where these method are overridden to provide a true value back.
-Another way is to call `__sub_from_eval` and/or `__sub_from_factory`
-directly. The ["AUTHOR"](#author) is not aware of other ways to trigger that code.
+    my @manglers = $obj->generate_array_manglers($key, $aref, $defaults);
 
-If your attacker is able to do that, this module isn't likely to add
-more capabilities because they already have anything needed anyway. For
-example, they might substitute `prepare_app` instead and put arbitrary
-code there, or if they can call `__sub_from_eval` they might just be
-able to call `eval` directly by themselves.
+generate manglers starting from an array definition. `$aref` MUST be
+an `ARRAY` reference. Depending on the number of elements in `@$aref`:
 
-Anyway this consideration is NOT based on a thorough analysis, so there
-can be corner cases where this situation might actually open further
-doors.  For example, there might be different ways to substitute
-["ALLOW\_EVAL"](#allow_eval)/["ALLOW\_FACTORY"](#allow_factory) that the ["AUTHOR"](#author) is not aware of,
-whereas these ways might not be applicable to substituting
-`prepare_app` or something different instead. Or they might manage to
-call `__sub_from_eval` (or `__sub_from_factory`) in other ways.
+- if no element is present, a _remove_ mangler is generated via
+["generate\_remove\_manglers"](#generate_remove_manglers)
+- if exactly one element is present, a _value_ mangler is generated via
+["generate\_value\_manglers"](#generate_value_manglers)
+- otherwise, an exception is thrown.
 
-If you're unsure about it, you can:
+## **generate\_code\_manglers**
 
-- perform a thorough assessment of the code, possibly supported by a
-security and Perl expert, until you're fine with it, OR
-- remove the code you're not comfortable with (look for `__sub_from_eval`
-and `__sub_from_factory`), OR
-- NOT use this module.
+    my @manglers = $obj->generate_code_manglers($key, $sub, $defaults);
 
-Whatever you choose to do, it will be YOUR choice!
+generate manglers from a sub definition. `$sub` MUST be a `CODE`
+reference.
+
+The provided sub is wrapped using ["wrap\_code"](#wrap_code) to set the right
+behaviour around `$sub`, then the output mangler is returned as
+follows:
+
+    [$key => {%$defaults, wrapsub => $wrapped_sub}]
+
+## **generate\_hash\_manglers**
+
+    my @manglers = $obj->generate_hash_manglers($key, $hash, $defaults);
+
+generate manglers from a hash definition. `$hash` MUST be a `HASH`
+reference.
+
+This sub applies the procedure exposed in the ["DESCRIPTION"](#description) and it
+will not be repeated here.
+
+## **generate\_manglers**
+
+    my @manglers = $obj->generate_manglers($key, $value, $defaults);
+
+Generate zero, one or more manglers, dispatching to the proper function
+depending on the type of `$value`. `$defaults` is a hash reference
+holding default values for the generated mangler, e.g. setting
+`override` to 1 by default.
+
+At the moment, all generation methods return exactly one mangler per
+call. This can of course change in derived classes, hence the returned
+value can contain any number of items.
+
+This method does the following dispatching based on `ref($value)`:
+
+- non-reference scalars: ["generate\_value\_manglers"](#generate_value_manglers)
+- array references: ["generate\_array\_manglers"](#generate_array_manglers)
+- hash references: ["generate\_hash\_manglers"](#generate_hash_manglers)
+- code references: ["generate\_code\_manglers"](#generate_code_manglers)
+- anything else throws an exception.
+
+If you want to override it (e.g. to add support for different types, or
+change the default ones described above) you might augment it like in
+the following example:
+
+    # suppose we want to do something with Regexp references
+
+    package Plack::Middleware::MangleEnv::Derived;
+    use parent 'Plack::Middleware::MangleEnv';
+    sub generate_manglers {
+       my $self = shift;
+
+       return $self->generate_regex_manglers(@_)
+         if ref($_[1]) eq 'Regexp';
+
+       return $self->SUPER::generate_manglers(@_);
+    }
+    sub generate_regex_manglers {
+       my ($self, $key, $regex, $defaults) = @_;
+       my $sub = sub {
+          defined(my $value = shift) or return; # do nothing if undef
+          my ($capture) = $value =~ m{$regex};
+          return $capture;
+       };
+       my $wrapsub = $self->wrap_code($sub);
+       return [$key => {%$defaults, wrapsub => $wrapsub}];
+    }
+    1;
+
+## **generate\_remove\_manglers**
+
+    my @manglers = $obj->generate_remove_manglers($key, $value, $defaults);
+
+convenience function to generate manglers for removing. Such manglers
+are supposed to have this form:
+
+    [ $key => { remove => 1 } ]
+
+and this function does exactly this, ignoring `$defaults` and checking
+that `$value` is empty if it is a hash reference (it is used by
+["generate\_hash\_manglers"](#generate_hash_manglers) behind the scenes, so this checks that there
+are no further keys in the input mangler definition).
+
+## **generate\_value\_manglers**
+
+    my @manglers = $obj->generate_value_manglers($key, $value, $defaults);
+
+generates this mangler:
+
+    [$key => {%$defaults, value => $value}]
+
+i.e. the standard mangler for setting a straight value.
+
+## **push\_manglers**
+
+    $obj->push_manglers->(@manglers);
+
+add the provided `@manglers` to the list of manglers that will be used
+at runtime.
+
+Used by `prepare_app` to populate the list of runtime manglers from the
+provided inputs. For every input definition of a mangler,
+["generate\_manglers"](#generate_manglers) is called and its output fed to this method, like
+this:
+
+    my @manglers = $obj->generate_manglers(...);
+    $obj->push_manglers(@manglers);
+
+You might want to override this method if you want to further process
+_all_ the generated manglers, like this:
+
+    package Plack::Middleware::MangleEnv::Derived;
+    use parent 'Plack::Middleware::MangleEnv';
+    sub push_manglers {
+       my $self = shift;
+       my @manglers = map { do_something($_) } @_;
+       return $self->SUPER::push_manglers(@manglers);
+    }
+    ...
+
+## **stringified\_list**
+
+    my @strings = $obj->stringified_list(@list);
+
+convenience function to generate a list of strings suitable for logging.
+Defined element are escaped and put into single quotes, while `undef`
+is rendered as the string `undef` (without quoting).
+
+## **wrap\_code**
+
+    my $wrapped_sub = $obj->wrap_code($key, $sub);
+
+wrap a code sub adhering to the ["Sub Reference Interface"](#sub-reference-interface) to implement
+the behaviour described in the same subsection. It is used by both
+["generate\_code\_manglers"](#generate_code_manglers) and ["generate\_hash\_manglers"](#generate_hash_manglers) to wrap input
+`sub`s.
 
 # BUGS AND LIMITATIONS
 

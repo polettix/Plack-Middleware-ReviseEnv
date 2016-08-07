@@ -50,31 +50,129 @@ sub call {
 sub prepare_app {
    my ($self) = @_;
    $self->_normalize_input_structure();    # reorganize internally
-   $self->{_manglers} = \my @manglers;    # where "real" manglers will be
-   my @inputs = @{$self->{manglers}};       # we will consume @inputs
+   my @inputs = @{$self->{manglers}};      # we will consume @inputs
+   $self->{_manglers} = [];
 
    while (@inputs) {
       my ($key, $value) = splice @inputs, 0, 2;
-      my $ref = ref $value;
-      if (!$ref) {    # simple case, that's the value we want, full stop
-         push @manglers, [$key, {value => $value, override => 1}];
-      }
-      elsif ($ref eq 'ARRAY') {
-         $self->_add_array_mangler($key, $value, 1);
-      }
-      elsif ($ref eq 'CODE') {
-         $self->_add_wrapsub_mangler($key, $value, 1);
-      }
-      elsif ($ref eq 'HASH') {
-         $self->_add_hash_mangler($key, $value, 1);
-      }
-      else {
-         confess "invalid reference '$ref' for '$key'";
-      }
-   } ## end while (@inputs)
+      $self->push_manglers(
+         $self->generate_manglers($key, $value, {override => 1}));
+   }
 
    return $self;
 } ## end sub prepare_app
+
+sub push_manglers {
+   my $self = shift;
+   push @{$self->{_manglers}}, @_;
+   return $self;
+} ## end sub push_manglers
+
+sub generate_manglers { # simple dispatch method
+   my $self = shift;
+   my ($key, $value) = @_; # ignoring rest of parameters here
+   my $ref  = ref $value;
+   return $self->generate_value_manglers(@_) unless $ref;
+   return $self->generate_array_manglers(@_) if $ref eq 'ARRAY';
+   return $self->generate_hash_manglers(@_)  if $ref eq 'HASH';
+   return $self->generate_code_manglers(@_)  if $ref eq 'CODE';
+
+   confess "invalid reference '$ref' for '$key'";
+} ## end sub generate_manglers
+
+sub generate_value_manglers {
+   my ($self, $key, $value, $defaults) = @_;
+   return [$key => {%$defaults, value => $value}];
+}
+
+sub generate_array_manglers {
+   my ($self, $key, $aref, $defaults) = @_;
+   return $self->generate_remove_manglers($key, undef, $defaults)
+     if @$aref == 0;
+   return $self->generate_value_manglers($key, $aref->[0], $defaults)
+      if @$aref == 1;
+
+   my @values = $self->stringified_list(@$aref);
+   confess "array for '$key' has more than one value (@values)";
+}
+
+sub generate_code_manglers {
+   my ($self, $key, $sub, $defaults) = @_;
+   $sub = $self->wrap_code($key, $sub);
+   return [$key => {%$defaults, wrapsub => $sub}];
+}
+
+sub generate_hash_manglers {
+   my ($self, $key, $hash, $defaults) = @_;
+
+   return $self->generate_remove_manglers($key, $hash, $defaults)
+     if delete $hash->{remove};
+
+   my ($type, $value) = $self->_only_one($hash, qw< env ENV sub value >);
+
+   my %opt = %$defaults;
+   $opt{override} = delete($hash->{override}) if exists($hash->{override});
+
+   if (my @residual = keys %$hash) {
+      @residual = $self->stringified_list(@residual);
+      confess "unknown keys ('@residual') in '$key'";
+   }
+
+   ($type, $value) = (wrapsub => $self->wrap_code($key, $value))
+     if $type eq 'sub';
+
+   return [$key => {%opt, $type => $value}];
+}
+
+sub generate_remove_manglers {
+   my ($self, $key, $value, $defaults) = @_;
+   if ((ref($value) eq 'HASH') && (my @keys = keys(%$value))) {
+      @keys = $self->stringified_list(@keys);
+      confess "remove MUST be alone when set to true, found (@keys)";
+   }
+   return [$key, {remove => 1}]; # ignore $defaults for now
+}
+
+sub wrap_code {
+   my ($self, $key, $sub) = @_;
+   confess "sub for '$key' is not a CODE reference"
+     unless ref($sub) eq 'CODE';
+   return sub {
+      defined(my $retval = $sub->(@_)) or return;
+      $retval = [$retval] unless ref($retval);
+
+      my ($value, $env, $key) = @_;
+      confess "sub for '$key' returned an invalid value"
+        unless ref($retval) eq 'ARRAY';
+
+      my $n = scalar @$retval;
+      if ($n == 0) {
+         delete $env->{$key};
+      }
+      elsif ($n == 1) {
+         $env->{$key} = $retval->[0];
+      }
+      else {
+         my @values = $self->stringified_list(@$retval);
+         confess "too many return values (@values) from sub for '$key'";
+      }
+
+      return;
+   };
+}
+
+sub stringified_list {
+   my $self = shift;
+   return map {
+      if (defined(my $v = $_)) {
+         $v =~ s{([\\'])}{\\$1}gmxs;
+         "'$v'";
+      }
+      else {
+         'undef';
+      }
+   } @_;
+}
 
 # _PRIVATE METHODS_
 
@@ -83,7 +181,7 @@ sub _normalize_input_structure {
    if (exists $self->{manglers}) {
       local $" = "', '";
       my $mangle = $self->{manglers};
-      $mangle = $self->{manglers} = [ %$mangle ] if ref($mangle) eq 'HASH';
+      $mangle = $self->{manglers} = [%$mangle] if ref($mangle) eq 'HASH';
       confess "'mangle' MUST point to an array or hash reference"
         unless ref($mangle) eq 'ARRAY';
       confess "'mangle' array MUST contain an even number of items"
@@ -91,115 +189,28 @@ sub _normalize_input_structure {
       my @keys = keys %$self;
       confess "'mangle' MUST be standalone when present (found: '@keys')"
         if grep { ($_ ne 'app') && ($_ ne 'manglers') } @keys;
-   } ## end if (exists $self->{mangle...})
+   } ## end if (exists $self->{manglers...})
    else {    # anything except app goes into mangle
       my $app = delete $self->{app};    # temporarily remove it
       %$self = (
-         app      => $app,                # put it back
-         manglers => [%$self],            # with rest as manglers
+         app      => $app,              # put it back
+         manglers => [%$self],          # with rest as manglers
       );
-   } ## end else [ if (exists $self->{mangle...})]
+   } ## end else [ if (exists $self->{manglers...})]
    return $self;
-} ## end sub _normalize_internal_structure
+} ## end sub _normalize_input_structure
 
-sub _add_array_mangler {
-   my ($self, $key, $aref, $override) = @_;
-   my $manglers = $self->{_manglers};
-   if (@$aref == 0) {
-      push @$manglers, [$key => {remove => 1}];
-   }
-   elsif (@$aref == 1) {
-      push @$manglers,
-        [$key => {value => $aref->[0], override => $override}];
-   }
-   else {
-      confess "array for '$key' has more than one value (@$aref)";
-   }
-   return;
-} ## end sub _add_array_mangler
-
-sub __wrapsub_mangler {
-   my ($sub) = @_;
-   return sub {
-      my ($value, $env, $key) = @_;
-      defined(my $retval = $sub->($value, $env, $key)) or return;
-      $retval = [$retval] unless ref($retval);
-
-      confess "sub for '$key' returned an invalid value"
-        unless ref($retval) eq 'ARRAY';
-
-      my $n = scalar @$retval;
-      confess "too many return values (@$retval) from sub for '$key'"
-        if $n > 1;
-
-      $env->{$key} = $retval->[0] if $n;
-      delete $env->{$key} unless $n;
-      return;
-   };
-} ## end sub __wrapsub_mangler
-
-sub _add_wrapsub_mangler {
-   my ($self, $key, $sub, $override) = @_;
-   push @{$self->{_manglers}},
-     [
-      $key => {
-         wrapsub  => __wrapsub_mangler($sub),
-         override => $override,
-      }
-     ];
-   return;
-} ## end sub _add_wrapsub_mangler
-
-sub __exactly_one_key_among {
-   my ($hash, @keys) = @_;
+sub _only_one {
+   my ($self, $hash, @keys) = @_;
    my @found = grep { exists $hash->{$_} } @keys;
-   return $found[0] if @found == 1;
+   return ($found[0], delete($hash->{$found[0]})) if @found == 1;
 
-   local $" = "', '";
+   @keys = $self->stringified_list(@keys);
+   @found = $self->stringified_list(@found);
    confess scalar(@found)
-     ? "one in ('@keys') MUST be provided, none found"
-     : "only one in ('@keys') is allowed, found ('@found')";
+     ? "one in (@keys) MUST be provided, none found"
+     : "only one in (@keys) is allowed, found (@found)";
 } ## end sub __exactly_one_key_among
-
-sub _add_remover {
-   my ($self, $key, $hash) = @_;
-   if ($hash && (my @keys = keys(%$hash))) {
-      local $" = "', '";
-      confess "remove MUST be alone when set to true, found ('@keys')";
-   }
-   push @{$self->{_manglers}}, [$key, {remove => 1}];
-   return;
-} ## end sub _add_remover
-
-sub _add_hash_mangler {
-   my ($self, $key, $hash, $default_override) = @_;
-   my $manglers = $self->{_manglers};
-
-   return $self->_add_remover($key, $hash) if delete $hash->{remove};
-
-   my $type = __exactly_one_key_among($hash, qw< env ENV sub value >);
-   my $value = delete $hash->{$type};
-
-   my $override =
-     exists($hash->{override})
-     ? delete($hash->{override})
-     : $default_override;
-
-   if (my @residual = keys %$hash) {
-      local $" = "', '";
-      confess "unknown keys ('@residual') in '$key'";
-   }
-
-   if ($type eq 'sub') {
-      confess "sub for '$key' is not a CODE reference"
-        unless ref($value) eq 'CODE';
-      $type = 'wrapsub';
-      $value = __wrapsub_mangler($value);
-   }
-
-   push @$manglers, [$key => {$type => $value, override => $override}];
-   return;
-} ## end sub _add_hash_mangler
 
 1;
 __END__

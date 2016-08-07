@@ -204,17 +204,10 @@ following:
 points to a string that will be used to extract the value from C<$env>
 itself. Useful if you want to I<change the name> of a parameter;
 
-Can not appear together with either C<ENV> or C<value>, for obvious
-reasons;
-
 =item C<ENV>
 
 points to a string that will be used to extract the value from C<%ENV>.
-Useful if you want to get some variables from the environment, e.g. see
-L</Example Scenario>.
-
-Can not appear together with either C<env> or C<value>, for obvious
-reasons;
+Useful if you want to get some variables from the environment.
 
 =item C<override>
 
@@ -303,10 +296,9 @@ Examples:
 
 =head1 METHODS
 
-=head2 Plack-related
-
 The following methods are implemented as part of the interface for a
-Plack middleware.
+Plack middleware. Although you can override them... there's probably
+little sense in doing this!
 
 =over
 
@@ -315,6 +307,195 @@ Plack middleware.
 =item prepare_app
 
 =back
+
+Methods described in the following subsections can be overridden or used
+in derived classes. The various C<generate*_manglers> functions have the
+plural form because they can potentially return a list of manglers; in
+this module, anyway, each of them returns one single mangler per call.
+
+=head2 B<< generate_array_manglers >>
+
+   my @manglers = $obj->generate_array_manglers($key, $aref, $defaults);
+
+generate manglers starting from an array definition. C<$aref> MUST be
+an C<ARRAY> reference. Depending on the number of elements in C<@$aref>:
+
+=over
+
+=item *
+
+if no element is present, a I<remove> mangler is generated via
+L</generate_remove_manglers>
+
+=item *
+
+if exactly one element is present, a I<value> mangler is generated via
+L</generate_value_manglers>
+
+=item *
+
+otherwise, an exception is thrown.
+
+=back
+
+=head2 B<< generate_code_manglers >>
+
+   my @manglers = $obj->generate_code_manglers($key, $sub, $defaults);
+
+generate manglers from a sub definition. C<$sub> MUST be a C<CODE>
+reference.
+
+The provided sub is wrapped using L</wrap_code> to set the right
+behaviour around C<$sub>, then the output mangler is returned as
+follows:
+
+   [$key => {%$defaults, wrapsub => $wrapped_sub}]
+
+=head2 B<< generate_hash_manglers >>
+
+   my @manglers = $obj->generate_hash_manglers($key, $hash, $defaults);
+
+generate manglers from a hash definition. C<$hash> MUST be a C<HASH>
+reference.
+
+This sub applies the procedure exposed in the L</DESCRIPTION> and it
+will not be repeated here.
+
+=head2 B<< generate_manglers >>
+
+   my @manglers = $obj->generate_manglers($key, $value, $defaults);
+
+Generate zero, one or more manglers, dispatching to the proper function
+depending on the type of C<$value>. C<$defaults> is a hash reference
+holding default values for the generated mangler, e.g. setting
+C<override> to 1 by default.
+
+At the moment, all generation methods return exactly one mangler per
+call. This can of course change in derived classes, hence the returned
+value can contain any number of items.
+
+This method does the following dispatching based on C<ref($value)>:
+
+=over
+
+=item *
+
+non-reference scalars: L</generate_value_manglers>
+
+=item *
+
+array references: L</generate_array_manglers>
+
+=item *
+
+hash references: L</generate_hash_manglers>
+
+=item *
+
+code references: L</generate_code_manglers>
+
+=item *
+
+anything else throws an exception.
+
+=back
+
+If you want to override it (e.g. to add support for different types, or
+change the default ones described above) you might augment it like in
+the following example:
+
+   # suppose we want to do something with Regexp references
+
+   package Plack::Middleware::MangleEnv::Derived;
+   use parent 'Plack::Middleware::MangleEnv';
+   sub generate_manglers {
+      my $self = shift;
+
+      return $self->generate_regex_manglers(@_)
+        if ref($_[1]) eq 'Regexp';
+
+      return $self->SUPER::generate_manglers(@_);
+   }
+   sub generate_regex_manglers {
+      my ($self, $key, $regex, $defaults) = @_;
+      my $sub = sub {
+         defined(my $value = shift) or return; # do nothing if undef
+         my ($capture) = $value =~ m{$regex};
+         return $capture;
+      };
+      my $wrapsub = $self->wrap_code($sub);
+      return [$key => {%$defaults, wrapsub => $wrapsub}];
+   }
+   1;
+
+=head2 B<< generate_remove_manglers >>
+
+   my @manglers = $obj->generate_remove_manglers($key, $value, $defaults);
+
+convenience function to generate manglers for removing. Such manglers
+are supposed to have this form:
+
+   [ $key => { remove => 1 } ]
+
+and this function does exactly this, ignoring C<$defaults> and checking
+that C<$value> is empty if it is a hash reference (it is used by
+L</generate_hash_manglers> behind the scenes, so this checks that there
+are no further keys in the input mangler definition).
+
+=head2 B<< generate_value_manglers >>
+
+   my @manglers = $obj->generate_value_manglers($key, $value, $defaults);
+
+generates this mangler:
+
+   [$key => {%$defaults, value => $value}]
+
+i.e. the standard mangler for setting a straight value.
+
+=head2 B<< push_manglers >>
+
+   $obj->push_manglers->(@manglers);
+
+add the provided C<@manglers> to the list of manglers that will be used
+at runtime.
+
+Used by C<prepare_app> to populate the list of runtime manglers from the
+provided inputs. For every input definition of a mangler,
+L</generate_manglers> is called and its output fed to this method, like
+this:
+
+   my @manglers = $obj->generate_manglers(...);
+   $obj->push_manglers(@manglers);
+
+You might want to override this method if you want to further process
+I<all> the generated manglers, like this:
+
+   package Plack::Middleware::MangleEnv::Derived;
+   use parent 'Plack::Middleware::MangleEnv';
+   sub push_manglers {
+      my $self = shift;
+      my @manglers = map { do_something($_) } @_;
+      return $self->SUPER::push_manglers(@manglers);
+   }
+   ...
+
+
+=head2 B<< stringified_list >>
+
+   my @strings = $obj->stringified_list(@list);
+
+convenience function to generate a list of strings suitable for logging.
+Defined element are escaped and put into single quotes, while C<undef>
+is rendered as the string C<undef> (without quoting).
+
+=head2 B<< wrap_code >>
+
+   my $wrapped_sub = $obj->wrap_code($key, $sub);
+
+wrap a code sub adhering to the L</Sub Reference Interface> to implement
+the behaviour described in the same subsection. It is used by both
+L</generate_code_manglers> and L</generate_hash_manglers> to wrap input
+C<sub>s.
 
 
 =head1 BUGS AND LIMITATIONS

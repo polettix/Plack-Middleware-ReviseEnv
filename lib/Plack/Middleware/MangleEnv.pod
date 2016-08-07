@@ -330,7 +330,7 @@ L</generate_remove_manglers>
 =item *
 
 if exactly one element is present, a I<value> mangler is generated via
-L</generate_value_manglers>
+L</generate_immediate_manglers> with type C<value>
 
 =item *
 
@@ -479,7 +479,7 @@ This method does the following dispatching based on C<ref($value)>:
 
 =item *
 
-non-reference scalars: L</generate_value_manglers>
+non-reference scalars: L</generate_immediate_manglers> with type C<value>
 
 =item *
 
@@ -546,7 +546,7 @@ are no further keys in the input mangler definition).
    my @values = $obj->get_values_from_source($env, $spec);
 
 runtime helper that expands the C<$spec> according to the rules
-explained in L</generate_hash_mangler_list> for each source.
+explained in L</generate_hash_manglers_list> for each source.
 
 =head2 B<< normalize_source >>
 

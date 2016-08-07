@@ -436,9 +436,6 @@ mutually exclusive keys indicating where the value should be taken from.
 
 Same as L</generate_remove_manglers>.
 
-=head2 B<< generate_hash_manglers_sprintf >>
-
-
 =head2 B<< generate_hash_manglers_sub >>
 
 Same as L</generate_code_manglers>.

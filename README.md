@@ -359,8 +359,6 @@ above as an overriding specialization (with the exception of
 
 Same as ["generate\_remove\_manglers"](#generate_remove_manglers).
 
-## **generate\_hash\_manglers\_sprintf**
-
 ## **generate\_hash\_manglers\_sub**
 
 Same as ["generate\_code\_manglers"](#generate_code_manglers).

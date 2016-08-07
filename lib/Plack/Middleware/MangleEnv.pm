@@ -165,29 +165,18 @@ sub get_values_from_source {
    my @retval = grep { ref($_) || (! $remove_if->{$_}) } @values;
    return unless @retval;
 
-   # join if requested
-   my $join = $source->{join};
-   if (defined $join) {
-      my ($joinstr) = $self->get_values_from_source($env, $join);
-      return join $joinstr, @retval;
-   }
-
    return @retval;
 }
 
 sub normalize_source {
    my ($self, $source, $defaults) = @_;
    my %src;
-   for my $feature (qw< remove_if default default_on_empty flatten join >) {
+   for my $feature (qw< remove_if default default_on_empty flatten >) {
       $src{$feature} = exists($source->{$feature})
          ? delete($source->{$feature}) : $defaults->{$feature};
    }
    $src{remove_if} = { map { $_ => 1 } @{$src{remove_if}} };
    $src{default} = [$src{default}] unless ref($src{default}) eq 'ARRAY';
-   if (defined $src{join}) {
-      $src{join} = { value => $src{join} } unless ref $src{join};
-      $src{join} = $self->normalize_source($src{join}, {%$defaults, join => undef});
-   }
    confess "too many elements in default for list"
       if @{$src{default}} > 1;
    confess "too many options in list" if keys(%$source) > 1;
@@ -204,11 +193,16 @@ sub generate_hash_manglers_list {
    $cfg->{default} ||= [];
    $cfg->{default_on_empty} ||= 0;
    $cfg->{flatten} ||= 0;
-   my $join = $cfg->{join};
-   if (defined $join) {
-      $join = { value => $join } unless ref $join;
-      $join = $self->normalize_source($join, $cfg);
+
+   my $count = 0;
+   for my $feature (qw< join sprintf >) {
+      defined(my $v = $cfg->{$feature}) or next;
+      confess "cannot specify both join and sprintf for '$key'"
+        if ++$count > 1;
+      $v = {value => $v} unless ref $v;
+      $cfg->{$feature} = $self->normalize_source($v, {%$opts, $feature => undef});
    }
+   my ($join, $sprintf) = @{$cfg}{qw< join sprintf >};
 
    my @sources = map {
       $self->normalize_source($_, $cfg);
@@ -224,6 +218,10 @@ sub generate_hash_manglers_list {
       if (defined $join) {
          my ($joinstr) = $self->get_values_from_source($env, $join);
          $env->{$key} = join $joinstr, @retval;
+      }
+      elsif (defined $sprintf) {
+         my ($sprintfstr) = $self->get_values_from_source($env, $sprintf);
+         $env->{$key} = sprintf $sprintfstr, @retval;
       }
       else {
          $env->{$key} = \@retval;

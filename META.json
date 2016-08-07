@@ -48,6 +48,7 @@
          "requires" : {
             "HTTP::Message" : "0",
             "Path::Tiny" : "0.096",
+            "Test::Exception" : "0",
             "Test::More" : "0.88"
          }
       }

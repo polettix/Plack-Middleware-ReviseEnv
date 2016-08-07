@@ -98,9 +98,10 @@ sub ref_to {
 sub _normalize_internal_structure {
    my ($self) = @_;
    if (exists $self->{mangle}) {
-      my $mangle = $self->{mangle};
       local $" = "', '";
-      confess "'mangle' MUST point to an array reference"
+      my $mangle = $self->{mangle};
+      $mangle = $self->{mangle} = [ %$mangle ] if ref($mangle) eq 'HASH';
+      confess "'mangle' MUST point to an array or hash reference"
         unless ref($mangle) eq 'ARRAY';
       confess "'mangle' array MUST contain an even number of items"
         if @$mangle % 2;

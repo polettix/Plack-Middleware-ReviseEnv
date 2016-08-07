@@ -22,12 +22,9 @@ my $app = sub {
 
 # enable EVAL and FACTORY
 use Plack::Middleware::MangleEnv;
-{
-   no strict 'refs';
-   *Plack::Middleware::MangleEnv::ALLOW_EVAL = sub { return 1 };
-   *Plack::Middleware::MangleEnv::ALLOW_FACTORY = sub { return 1 };
-}
-
+my $true_sub = sub { return 1 };
+*Plack::Middleware::MangleEnv::ALLOW_EVAL = $true_sub;
+*Plack::Middleware::MangleEnv::ALLOW_FACTORY = $true_sub;
 
 $app = builder {
    enable 'MangleEnv', 'psgi.url_scheme' => sub {

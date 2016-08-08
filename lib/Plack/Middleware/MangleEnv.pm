@@ -291,25 +291,40 @@ sub stringified_list {
 
 sub _normalize_input_structure {
    my ($self) = @_;
+
+   my $app = delete $self->{app};    # temporarily remove these keys
+   my $opts = delete($self->{opts}) || {};
+   $opts->{start} ||= '[%';
+   $opts->{stop}  ||= '%]';
+
+   my $manglers;
    if (exists $self->{manglers}) {
-      local $" = "', '";
-      my $mangle = $self->{manglers};
-      $mangle = $self->{manglers} = [%$mangle] if ref($mangle) eq 'HASH';
-      confess "'mangle' MUST point to an array or hash reference"
-        unless ref($mangle) eq 'ARRAY';
-      confess "'mangle' array MUST contain an even number of items"
-        if @$mangle % 2;
-      my @keys = keys %$self;
-      confess "'mangle' MUST be standalone when present (found: '@keys')"
-        if grep { ($_ ne 'app') && ($_ ne 'manglers') } @keys;
+      $manglers = delete $self->{manglers};
+
+      if (my @keys = keys %$self) {
+         @keys = $self->stringified_list(@keys);
+         confess "invalid stray keys found: @keys"
+      }
+
+      if (ref($manglers) eq 'HASH') {
+         $manglers = [%$manglers];
+      }
+      elsif (ref($manglers) ne 'ARRAY') {
+         confess "'manglers' MUST point to an array or hash reference"
+      }
+      elsif  (@$manglers % 2) {
+         confess "'manglers' array MUST contain an even number of items"
+      }
    } ## end if (exists $self->{manglers...})
    else {    # anything except app goes into mangle
-      my $app = delete $self->{app};    # temporarily remove it
-      %$self = (
-         app      => $app,              # put it back
-         manglers => [%$self],          # with rest as manglers
-      );
+      $manglers = [%$self];
    } ## end else [ if (exists $self->{manglers...})]
+
+   %$self = (
+      app      => $app,
+      manglers => $manglers,
+      opts     => $opts,
+   );
    return $self;
 } ## end sub _normalize_input_structure
 

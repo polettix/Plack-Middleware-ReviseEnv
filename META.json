@@ -32,6 +32,8 @@
       "develop" : {
          "requires" : {
             "Dist::Milla" : "v1.0.15",
+            "Dist::Zilla::Plugin::MetaProvides" : "0",
+            "Dist::Zilla::Plugin::Run" : "0",
             "Path::Tiny" : "0.096",
             "Template::Perlish" : "1.52",
             "Test::Pod" : "1.41"
@@ -53,7 +55,24 @@
          }
       }
    },
-   "release_status" : "testing",
+   "provides" : {
+      "Plack::Middleware::MangleEnv" : {
+         "file" : "lib/Plack/Middleware/MangleEnv.pm",
+         "version" : "0.001"
+      }
+   },
+   "release_status" : "stable",
+   "resources" : {
+      "bugtracker" : {
+         "web" : "https://github.com/polettix/Plack-Middleware-MangleEnv/issues"
+      },
+      "homepage" : "https://github.com/polettix/Plack-Middleware-MangleEnv",
+      "repository" : {
+         "type" : "git",
+         "url" : "https://github.com/polettix/Plack-Middleware-MangleEnv.git",
+         "web" : "https://github.com/polettix/Plack-Middleware-MangleEnv"
+      }
+   },
    "version" : "0.001",
    "x_contributors" : [
       "Flavio Poletti <flavio@polettix.it>"

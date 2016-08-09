@@ -133,14 +133,6 @@ sub parse_template {
       # trim intelligently, then unescape
       $chunk = $self->unescape($self->escaped_trim($chunk, $esc), $esc);
 
-      # get rid of quotes, if any
-      if (my ($quote) = $chunk =~ m{\A(['"])}mxs) {
-         my $clen = length $chunk;
-         confess "chunk '$chunk' is not quoted properly"
-           unless ($len > 1) && (substr($chunk, -1, 1) eq $quote);
-         $chunk = substr $chunk, 1, $clen - 2;
-      } ## end if (my ($quote) = $chunk...)
-
       my ($src, $key) = split /:/, $chunk, 2;
       confess "invalid source '$src' in chunk '$chunk'"
         if ($src ne 'env') && ($src ne 'ENV');

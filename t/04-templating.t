@@ -157,18 +157,6 @@ my @manglers = (
       _message => 'trailing space in var name, escape',
    },
    {
-      key => 'space.1.double quotes',
-      value => '[% "ENV:C " %]',
-      _expected => 'C',
-      _message => 'trailing space in var name, double quotes',
-   },
-   {
-      key => 'space.1.single quotes',
-      value => "[% 'ENV:C ' %]",
-      _expected => 'C',
-      _message => 'trailing space in var name, single quotes',
-   },
-   {
       key => 'space.2',
       value => '[% ENV: D %]',
       _expected => 'D',
@@ -179,18 +167,6 @@ my @manglers = (
       value => '[% ENV: E\\ %]',
       _expected => 'E',
       _message => 'lead/trail space in var name, escape',
-   },
-   {
-      key => 'space.3.double quotes',
-      value => '[% "ENV: E " %]',
-      _expected => 'E',
-      _message => 'lead/trail space in var name, double quotes',
-   },
-   {
-      key => 'space.3.single quotes',
-      value => "[% 'ENV: E ' %]",
-      _expected => 'E',
-      _message => 'lead/trail space in var name, single quotes',
    },
 );
 

@@ -8,39 +8,34 @@ use English qw< -no_match_vars >;
 
 use parent 'Plack::Middleware';
 
-# Note: manglers in "manglers" here are totally reconstructured and not
-# necessarily straightly coming from the "mangle" field in the original
 sub call {
    my ($self, $env) = @_;
- VAR:
-   for my $mangler (@{$self->{_manglers}}) {
-      my ($key, $value) = @$mangler;
-      if ($value->{remove}) {
-         delete $env->{$key};
-      }
-      elsif (exists($env->{$key}) && (!$value->{override})) {
+   my %vars = (env => $env, ENV => \%ENV);
+ MANGLER:
+   for my $mangler (@{$self->{_manglers} || []}) {
+      my ($key, $value) = map {
+         my $retval;
+         if (defined $_) {
+            my $all_defs = 1;
+            my @parts = grep { defined($_) ? 1 : ($all_defs = 0) } map {
+               (! ref($_)) ? $_
+               : exists($vars{$_->{src}}{$_->{key}}) ?
+                 $vars{$_->{src}}{$_->{key}} : undef;
+            } @$_;
 
-         # $env->{$key} is already OK here, do nothing!
-      }
-      elsif (exists $value->{value}) {    # set unconditionally
-         $env->{$key} = $value->{value};
-      }
-      elsif (exists $value->{env}) {      # copy from other item in $env
-         $env->{$key} = $env->{$value->{env}};
-      }
-      elsif (exists $value->{ENV}) {      # copy from %ENV
-         $env->{$key} = $ENV{$value->{ENV}};
-      }
-      elsif (exists $value->{sub}) {
-         $value->{sub}->($env->{$key}, $env, $key);
-      }
-      else {
-         require Data::Dumper;
-         my $package = ref $self;
-         confess "BUG in $package, value for '$key' not as expected: ",
-           Data::Dumper::Dumper($value);
-      } ## end else [ if ($value->{remove}) ]
-   } ## end VAR: for my $mangler (@{$self...})
+            if ($mangler->{require_all} && (! $all_defs)) {
+               $retval = undef;
+            }
+            else {
+               $retval = join '', @parts;
+            }
+         }
+         $retval;
+      } @{$mangler}{qw< key value >};
+      $env->{$key} = $value
+        if $mangler->{override} || (!exists($env->{$key}));
+      delete $env->{$key} unless defined $value;
+   } ## end MANGLER: for my $mangler (@{$self...})
 
    return $self->app()->($env);
 } ## end sub call
@@ -49,233 +44,211 @@ sub call {
 # so we are more relaxed about *not* calling too many subs
 sub prepare_app {
    my ($self) = @_;
-   $self->_normalize_input_structure();    # reorganize internally
-   my @inputs = @{$self->{manglers}};      # we will consume @inputs
-   $self->{_manglers} = [];
+   $self->normalize_input_structure();    # reorganize internally
+   my @inputs = @{$self->{manglers}};     # we will consume @inputs
+   my @manglers;
 
    while (@inputs) {
-      my ($key, $value) = splice @inputs, 0, 2;
-      $self->push_manglers(
-         $self->generate_manglers($key, $value, {override => 1}));
-   }
+      my $spec = shift @inputs;
+
+      # allow for key => value or \%spec
+      if (!ref($spec)) {
+         confess "stray mangler '$spec'" unless @inputs;
+         (my $key, $spec) = ($spec, shift @inputs);
+         $spec = {value => $spec} unless ref($spec) eq 'HASH';
+
+         # override key only if not already present. The external key
+         # can then be used for ordering manglers also in the hash
+         # scenario
+         $spec->{key} = $key unless defined $spec->{key};
+      } ## end if (!ref($spec))
+
+      push @manglers, $self->generate_mangler($spec);
+   } ## end while (@inputs)
+
+   # if we arrived here, it's safe
+   $self->{_manglers} = \@manglers;
 
    return $self;
 } ## end sub prepare_app
 
-sub push_manglers {
-   my $self = shift;
-   push @{$self->{_manglers}}, @_;
+sub generate_mangler {
+   my ($self, $spec) = @_;
+   confess "one spec has no (defined) key" unless defined $spec->{key};
+
+   my $opts = $self->{opts};
+   my $start = defined($spec->{start}) ? $spec->{start} : $opts->{start};
+   confess "start sequence cannot be empty" unless length $start;
+
+   my $stop  = defined($spec->{stop})  ? $spec->{stop}  : $opts->{stop};
+   confess "stop sequence cannot be empty" unless length $stop;
+
+   my $esc   = defined($spec->{esc})   ? $spec->{esc}   : $opts->{esc};
+   confess "escape sequence cannot be empty" unless length $esc;
+   confess "escape sequence cannot start with a space, sorry"
+      if substr($esc, 0, 1) eq ' ';
+   confess "escape sequence cannot be equal to start or stop sequence"
+     if ($esc eq $start) || ($esc eq $stop);
+
+   return {
+      override => (exists($spec->{override}) ? $spec->{override} : 1),
+      require_all => $spec->{require_all},
+      key   => $self->parse_template($spec->{key},   $start, $stop, $esc),
+      value => $self->parse_template($spec->{value}, $start, $stop, $esc),
+   };
+} ## end sub generate_mangler
+
+sub parse_template {
+   my ($self, $template, $start, $stop, $esc) = @_;
+   return undef unless defined $template;
+   my $pos = 0;
+   my $len = length $template;
+   my @chunks;
+ CHUNK:
+   while ($pos < $len) {
+
+      # find start, if any
+      my $i = $self->escaped_index($template, $start, $esc, $pos);
+      my $text = substr $template, $pos, ($i < 0 ? $len : $i) - $pos;
+      push @chunks, $self->unescape($text, $esc);
+      last CHUNK if $i < 0; # nothing more left to search
+
+      # advance position marker immediately after start sequence
+      $pos = $i + length $start;
+
+      # start sequence found, let's look for the stop
+      $i = $self->escaped_index($template, $stop, $esc, $pos);
+      confess "unclosed start sequence in '$template'" if $i < 0;
+
+      my $chunk = substr $template, $pos, $i - $pos;
+
+      # trim intelligently, then unescape
+      $chunk = $self->unescape($self->escaped_trim($chunk, $esc), $esc);
+
+      # get rid of quotes, if any
+      if (my ($quote) = $chunk =~ m{\A(['"])}mxs) {
+         my $clen = length $chunk;
+         confess "chunk '$chunk' is not quoted properly"
+           unless ($len > 1) && (substr($chunk, -1, 1) eq $quote);
+         $chunk = substr $chunk, 1, $clen - 2;
+      }
+
+      my ($src, $key) = split /:/, $chunk, 2;
+      confess "invalid source '$src' in chunk '$chunk'"
+         if ($src ne 'env') && ($src ne 'ENV');
+      confess "no key in chunk '$chunk'" unless defined $key;
+      push @chunks, {src => $src, key => $key};
+
+      # advance position marker for next iteration
+      $pos = $i + length $stop;
+
+   } ## end CHUNK: while ($pos < $len)
+
+   return \@chunks;
+} ## end sub parse_template
+
+sub unescape {
+   my ($self, $str, $esc) = @_;
+   $str =~ s{\Q$esc\E(.)}{$1}gmxs;
+   return $str;
+}
+
+sub escaped_trim {
+   my ($self, $str, $esc) = @_;
+   $str =~ s{\A\s+}{}mxs; # trimming the initial part is easy
+
+   my $pos = 0;
+   while ('necessary') {
+
+      # find next un-escaped space
+      my $i = $self->escaped_index($str, ' ', $esc, $pos);
+      last if $i < 0; # no further spaces... nothing to trim
+
+      # now look for escapes after that, because we're interested only
+      # in un-escaped spaces at the end of $str
+      my $e = index $str, $esc, $i + 1;
+
+      if ($e < 0) { # no escapes past last space found
+
+         # Now we split our string at $i, which represents the first
+         # space character that is not escaped and has no escapes after it.
+         # The string before it MUST NOT be subject to trimming, the part
+         # from $i on is safe to trim.
+         my $keep = substr $str, 0, $i, '';
+         $str =~ s{\s+\z}{}mxs;
+
+         # merge the two parts back and we're good to go
+         return $keep . $str;
+      }
+
+      # we found an escape sequence after the last space we found, we have
+      # to look further past this escape sequence
+      $pos = $e + length $esc;
+   }
+
+   # no trailing spaces to be trimmed found, $str is fine
+   return $str;
+}
+
+sub escaped_index {
+   my ($self, $str, $delimiter, $escaper, $pos) = @_;
+   defined $escaper or confess "here";
+
+   my $len = length $str;
+   while ($pos < $len) {
+      my $dpos = index $str, $delimiter, $pos; # next delimiter
+      my $epos = index $str, $escaper, $pos;   # next escaper
+      return $dpos
+        if ($dpos < 0)      # didn't find it
+        || ($epos < 0)      # nothing escaped at all
+        || ($dpos < $epos); # nothing escaped before it
+
+      # there's an escaper occurrence *before* a delimiter, so we have
+      # to honor the escaping and restart the quest past the escaped char
+      $pos = $epos + length($escaper) + 1;
+   } ## end while ('necessary')
+
+   confess "stray escaping in '$str'";
+} ## end sub _escaped_index
+
+sub normalize_input_structure {
+   my ($self) = @_;
+
+   my $app = delete $self->{app};    # temporarily remove these keys
+   my $opts = delete($self->{opts}) || {};
+   $opts->{start} ||= '[%';
+   $opts->{stop}  ||= '%]';
+   $opts->{esc}   ||= '\\';
+
+   my $manglers = exists($self->{manglers})
+     ? delete($self->{manglers})   # just take it
+     : __exhaust_hash($self);       # or move stuff out of $self
+
+   # Fun fact: __exhaust_hash($self) could have been written as:
+   #
+   #     { (@{[]}, %$self) = %$self }
+   #
+   # but let's avoid being too "clever" for readability's sake...
+
+   if (scalar keys %$self > 0) {
+      my @keys = __stringified_list(keys %$self);
+      confess "stray keys found: @keys";
+   }
+
+   $manglers = [map{ $_ => $manglers->{$_} } sort keys %$manglers]
+     if ref($manglers) eq 'HASH';
+
+   %$self = (
+      app      => $app,
+      manglers => $manglers,
+      opts     => $opts,
+   );
    return $self;
-} ## end sub push_manglers
+} ## end sub _normalize_input_structure
 
-sub generate_manglers { # simple dispatch method
-   my $self = shift;
-   my ($key, $value) = @_; # ignoring rest of parameters here
-   my $ref  = ref $value;
-   return $self->generate_immediate_manglers(value => @_) unless $ref;
-   return $self->generate_array_manglers(@_) if $ref eq 'ARRAY';
-   return $self->generate_hash_manglers(@_)  if $ref eq 'HASH';
-   return $self->generate_code_manglers(@_)  if $ref eq 'CODE';
+# _PRIVATE_ convenience functions
 
-   confess "invalid reference '$ref' for '$key'";
-} ## end sub generate_manglers
-
-sub generate_immediate_manglers {
-   my ($self, $type, $key, $value, $opts) = @_;
-   return [$key => {%$opts, $type => $value}];
-}
-
-sub generate_array_manglers {
-   my ($self, $key, $aref, $defaults) = @_;
-   return $self->generate_remove_manglers($key, undef, $defaults)
-     if @$aref == 0;
-   return $self->generate_immediate_manglers(value => $key, $aref->[0], $defaults)
-      if @$aref == 1;
-
-   my @values = $self->stringified_list(@$aref);
-   confess "array for '$key' has more than one value (@values)";
-}
-
-sub generate_code_manglers {
-   my ($self, $key, $sub, $opts) = @_;
-   $sub = $self->wrap_code($sub)
-     or confess "sub for '$key' is not a CODE reference";
-   return $self->generate_immediate_manglers(sub => $key, $sub, $opts);
-}
-
-sub generate_hash_manglers {
-   my ($self, $key, $hash, $defaults) = @_;
-
-   my %opt = %$defaults;
-   $opt{override} = delete($hash->{override}) if exists($hash->{override});
-
-   if ((my @keys = keys %$hash) > 1) {
-      @keys = $self->stringified_list(@keys);
-      confess "too many options ('@keys') for '$key'";
-   }
-
-   my ($type, $value) = %$hash;
-   my $cb = $self->can('generate_hash_manglers_' . $type)
-     or confess "unknown option '$type' for '$key'";
-
-   return $cb->($self, $key, $value, \%opt);
-}
-
-sub generate_hash_manglers_ENV {
-   my $self = shift;
-   return $self->generate_immediate_manglers(ENV => @_);
-}
-
-sub generate_hash_manglers_env {
-   my $self = shift;
-   return $self->generate_immediate_manglers(env => @_);
-}
-
-sub get_values_from_source {
-   my ($self, $env, $source) = @_;
-
-   # get right start value
-   my ($type, $sel) = @{$source}{qw< type value >};
-   my $svalue = ($type eq 'env') ? $env->{$sel}
-      : ($type eq 'ENV') ? $ENV{$sel}
-      : $sel;
-
-   # flatten if requested and possible
-   my @values = ($svalue);
-   if ($source->{flatten}) {
-      if (ref($svalue) eq 'ARRAY') {
-         @values = @$svalue;
-      }
-      elsif (ref($svalue) eq 'HASH') {
-         @values = %$svalue;
-      }
-   }
-
-   # handle undefined values
-   my $default = $source->{default};
-   my $doe = $source->{default_on_empty};
-   @values = map {
-      (! defined($_))            ? @$default
-      : ($doe && (! length($_))) ? @$default
-      :                            $_;
-   } @values;
-
-   # filter stuff out
-   my $remove_if = $source->{remove_if};
-   my @retval = grep { ref($_) || (! $remove_if->{$_}) } @values;
-   return unless @retval;
-
-   return @retval;
-}
-
-sub normalize_source {
-   my ($self, $source, $defaults) = @_;
-   my %src;
-   for my $feature (qw< remove_if default default_on_empty flatten >) {
-      $src{$feature} = exists($source->{$feature})
-         ? delete($source->{$feature}) : $defaults->{$feature};
-   }
-   $src{remove_if} = { map { $_ => 1 } @{$src{remove_if}} };
-   $src{default} = [$src{default}] unless ref($src{default}) eq 'ARRAY';
-   confess "too many elements in default for list"
-      if @{$src{default}} > 1;
-   confess "too many options in list" if keys(%$source) > 1;
-   confess "nothing to take from in list" if keys(%$source) < 1;
-   ($src{type}, $src{value}) = %$source;
-   confess "unknown source '$src{type}' in list"
-      unless grep {$_ eq $src{type}} qw< env ENV value >;
-   return \%src;
-}
-
-sub generate_hash_manglers_list {
-   my ($self, $key, $cfg, $opts) = @_;
-   $cfg->{remove_if} ||= [];
-   $cfg->{default} ||= [];
-   $cfg->{default_on_empty} ||= 0;
-   $cfg->{flatten} ||= 0;
-
-   my $count = 0;
-   for my $feature (qw< join sprintf >) {
-      defined(my $v = $cfg->{$feature}) or next;
-      confess "cannot specify both join and sprintf for '$key'"
-        if ++$count > 1;
-      $v = {value => $v} unless ref $v;
-      $cfg->{$feature} = $self->normalize_source($v, {%$opts, $feature => undef});
-   }
-   my ($join, $sprintf) = @{$cfg}{qw< join sprintf >};
-
-   my @sources = map {
-      $self->normalize_source($_, $cfg);
-   } @{$cfg->{sources}};
-
-   my $sub = sub {
-      my ($value, $env, $key) = @_;
-      my @retval;
-      for my $source (@sources) {
-         push @retval, $self->get_values_from_source($env, $source);
-      }
-
-      if (defined $join) {
-         my ($joinstr) = $self->get_values_from_source($env, $join);
-         $env->{$key} = join $joinstr, @retval;
-      }
-      elsif (defined $sprintf) {
-         my ($sprintfstr) = $self->get_values_from_source($env, $sprintf);
-         $env->{$key} = sprintf $sprintfstr, @retval;
-      }
-      else {
-         $env->{$key} = \@retval;
-      }
-   };
-   return $self->generate_immediate_manglers(sub => $key, $sub, $opts);
-}
-
-*generate_hash_manglers_remove = \&generate_remove_manglers;
-*generate_hash_manglers_sub    = \&generate_code_manglers;
-
-sub generate_hash_manglers_value {
-   my $self = shift;
-   return $self->generate_immediate_manglers(value => @_);
-}
-
-sub generate_remove_manglers {
-   my ($self, $key, $value, $defaults) = @_;
-   if ((ref($value) eq 'HASH') && (my @keys = keys(%$value))) {
-      @keys = $self->stringified_list(@keys);
-      confess "remove MUST be alone when set to true, found (@keys)";
-   }
-   return $self->generate_immediate_manglers(remove => $key, 1, {});
-}
-
-sub wrap_code {
-   my ($self, $sub) = @_;
-   return unless ref($sub) eq 'CODE';
-   return sub {
-      defined(my $retval = $sub->(@_)) or return;
-      $retval = [$retval] unless ref($retval);
-
-      my ($value, $env, $key) = @_;
-      confess "sub for '$key' returned an invalid value"
-        unless ref($retval) eq 'ARRAY';
-
-      my $n = scalar @$retval;
-      if ($n == 0) {
-         delete $env->{$key};
-      }
-      elsif ($n == 1) {
-         $env->{$key} = $retval->[0];
-      }
-      else {
-         my @values = $self->stringified_list(@$retval);
-         confess "too many return values (@values) from sub for '$key'";
-      }
-
-      return;
-   };
-}
-
-sub stringified_list {
-   my $self = shift;
+sub __stringified_list {
    return map {
       if (defined(my $v = $_)) {
          $v =~ s{([\\'])}{\\$1}gmxs;
@@ -287,58 +260,11 @@ sub stringified_list {
    } @_;
 }
 
-# _PRIVATE METHODS_
-
-sub _normalize_input_structure {
-   my ($self) = @_;
-
-   my $app = delete $self->{app};    # temporarily remove these keys
-   my $opts = delete($self->{opts}) || {};
-   $opts->{start} ||= '[%';
-   $opts->{stop}  ||= '%]';
-
-   my $manglers;
-   if (exists $self->{manglers}) {
-      $manglers = delete $self->{manglers};
-
-      if (my @keys = keys %$self) {
-         @keys = $self->stringified_list(@keys);
-         confess "invalid stray keys found: @keys"
-      }
-
-      if (ref($manglers) eq 'HASH') {
-         $manglers = [%$manglers];
-      }
-      elsif (ref($manglers) ne 'ARRAY') {
-         confess "'manglers' MUST point to an array or hash reference"
-      }
-      elsif  (@$manglers % 2) {
-         confess "'manglers' array MUST contain an even number of items"
-      }
-   } ## end if (exists $self->{manglers...})
-   else {    # anything except app goes into mangle
-      $manglers = [%$self];
-   } ## end else [ if (exists $self->{manglers...})]
-
-   %$self = (
-      app      => $app,
-      manglers => $manglers,
-      opts     => $opts,
-   );
-   return $self;
-} ## end sub _normalize_input_structure
-
-sub _only_one {
-   my ($self, $hash, @keys) = @_;
-   my @found = grep { exists $hash->{$_} } @keys;
-   return ($found[0], delete($hash->{$found[0]})) if @found == 1;
-
-   @keys = $self->stringified_list(@keys);
-   @found = $self->stringified_list(@found);
-   confess scalar(@found)
-     ? "one in (@keys) MUST be provided, none found"
-     : "only one in (@keys) is allowed, found (@found)";
-} ## end sub __exactly_one_key_among
+sub __exhaust_hash {
+   my ($target) = @_;
+   my $retval = {%$target};
+   %$target = ();
+   return $retval;
+}
 
 1;
-__END__

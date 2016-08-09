@@ -12,7 +12,7 @@ sub call {
    my ($self, $env) = @_;
    my %vars = (env => $env, ENV => \%ENV);
  MANGLER:
-   for my $mangler (@{$self->{_manglers} || []}) {
+   for my $mangler (@{$self->{manglers} || []}) {
       my ($key, $value) = map {
          my $def_parts = $mangler->{$_};
          my $retval;
@@ -50,7 +50,7 @@ sub call {
 sub prepare_app {
    my ($self) = @_;
    $self->normalize_input_structure();    # reorganize internally
-   my @inputs = @{$self->{manglers}};     # we will consume @inputs
+   my @inputs = @{delete $self->{manglers}}; # we will consume @inputs
    my @manglers;
 
    while (@inputs) {
@@ -72,7 +72,7 @@ sub prepare_app {
    } ## end while (@inputs)
 
    # if we arrived here, it's safe
-   $self->{_manglers} = \@manglers;
+   $self->{manglers} = \@manglers;
 
    return $self;
 } ## end sub prepare_app

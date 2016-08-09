@@ -14,15 +14,16 @@ sub call {
  MANGLER:
    for my $mangler (@{$self->{_manglers} || []}) {
       my ($key, $value) = map {
+         my $def_parts = $mangler->{$_};
          my $retval;
-         if (defined $_) {
+         if (defined $def_parts) {
             my $all_defs = 1;
             my @parts = grep { defined($_) ? 1 : ($all_defs = 0) } map {
                (!ref($_)) ? $_
                  : exists($vars{$_->{src}}{$_->{key}})
                  ? $vars{$_->{src}}{$_->{key}}
                  : undef;
-            } @$_;
+            } @$def_parts;
 
             if ($mangler->{require_all} && (!$all_defs)) {
                $retval = undef;
@@ -31,8 +32,11 @@ sub call {
                $retval = join '', @parts;
             }
          } ## end if (defined $_)
+         $retval = $mangler->{'default_' . $_}
+            if (! defined($retval))
+            || ((length($retval) == 0) && $mangler->{empty_as_default});
          $retval;
-      } @{$mangler}{qw< key value >};
+      } qw< key value >;
       $env->{$key} = $value
         if $mangler->{override} || (!exists($env->{$key}));
       delete $env->{$key} unless defined $value;
@@ -91,12 +95,12 @@ sub generate_mangler {
    confess "escape sequence cannot be equal to start or stop sequence"
      if ($esc eq $start) || ($esc eq $stop);
 
-   return {
-      override => (exists($spec->{override}) ? $spec->{override} : 1),
-      require_all => $spec->{require_all},
-      key => $self->parse_template($spec->{key}, $start, $stop, $esc),
-      value => $self->parse_template($spec->{value}, $start, $stop, $esc),
-   };
+   my %m = %$spec;
+   $m{override} = 1 unless exists $m{override};
+   $m{key}      = $self->parse_template($m{key},   $start, $stop, $esc);
+   $m{value}    = $self->parse_template($m{value}, $start, $stop, $esc);
+
+   return \%m;
 } ## end sub generate_mangler
 
 sub parse_template {

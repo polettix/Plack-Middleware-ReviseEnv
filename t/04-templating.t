@@ -18,7 +18,7 @@ my $app = sub {
    ];
 };
 
-my @manglers = (
+my @revisors = (
    {
       key       => '1',
       value     => 'whatever',
@@ -171,7 +171,7 @@ my @manglers = (
 );
 
 $app = builder {
-   enable 'MangleEnv', manglers => \@manglers;
+   enable 'ReviseEnv', revisors => \@revisors;
    $app;
 };
 
@@ -191,14 +191,14 @@ test_psgi $app, sub {
    my $res = $cb->(GET "/path/to/somewhere/else");
    is $res->content, "Hello World!", 'sample content';
 
-   for my $mangler (@manglers) {
-      my $key      = $mangler->{_key} || $mangler->{key};
-      my $expected = $mangler->{_expected};
+   for my $revisor (@revisors) {
+      my $key      = $revisor->{_key} || $revisor->{key};
+      my $expected = $revisor->{_expected};
       my $got      = $last_env->{$key};
       my $message =
-        exists($mangler->{_message}) ? " ($mangler->{_message})" : '';
+        exists($revisor->{_message}) ? " ($revisor->{_message})" : '';
       is $got, $expected, "\$env->{'$key'}$message";
-   } ## end for my $mangler (@manglers)
+   } ## end for my $revisor (@revisors)
 };
 
 done_testing();

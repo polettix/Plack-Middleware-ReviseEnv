@@ -21,5 +21,5 @@ while (my $path = $iter->()) {
      or BAIL_OUT("can't load $module");
 } ## end while (my $path = $iter->...)
 
-diag("Testing Plack::Middleware::MangleEnv $Plack::Middleware::MangleEnv::VERSION");
+diag("Testing Plack::Middleware::ReviseEnv $Plack::Middleware::ReviseEnv::VERSION");
 done_testing();

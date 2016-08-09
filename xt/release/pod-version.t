@@ -1,7 +1,7 @@
 use strict;
 use Test::More tests => 1;
 
-my $module = 'Plack::Middleware::MangleEnv';
+my $module = 'Plack::Middleware::ReviseEnv';
 
 (my $packfile = "$module.pm") =~ s{::}{/}gmxs;
 require $packfile;

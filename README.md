@@ -1,17 +1,17 @@
 # NAME
 
-Plack::Middleware::MangleEnv - Mangle request environment at will
+Plack::Middleware::ReviseEnv - Revise request environment at will
 
 # VERSION
 
-This document describes Plack::Middleware::MangleEnv version {{\[ version
+This document describes Plack::Middleware::ReviseEnv version {{\[ version
 \]}}.
 
 # SYNOPSIS
 
-    use Plack::Middleware::MangleEnv;
+    use Plack::Middleware::ReviseEnv;
 
-    my $mw = Plack::Middleware::MangleEnv->new(
+    my $mw = Plack::Middleware::ReviseEnv->new(
 
        # straight value
        var1 => 'a simple, overriding value',
@@ -48,16 +48,16 @@ This document describes Plack::Middleware::MangleEnv version {{\[ version
     );
 
     # you can also pass the key/value pairs as a hash reference
-    # associated to a key named 'manglers'. This is necessary e.g. if
+    # associated to a key named 'revisors'. This is necessary e.g. if
     # you want to set a variable in $env with name 'app', 'opts' or
-    # 'manglers'
-    my $mw2 = Plack::Middleware::MangleEnv->new(manglers => \%manglers);
+    # 'revisors'
+    my $mw2 = Plack::Middleware::ReviseEnv->new(revisors => \%revisors);
 
     # when evaluation order or repetition is important... use an array
-    # reference for 'manglers'. You can also avoid passing the external
+    # reference for 'revisors'. You can also avoid passing the external
     # key here, and just provide a sequence of hash definitions
-    my $mw3 = Plack::Middleware::MangleEnv->new(
-       manglers => [
+    my $mw3 = Plack::Middleware::ReviseEnv->new(
+       revisors => [
           KEY => { ... specification ... },
 
           # by default inexistent/undef inputs are expanded as empty
@@ -142,14 +142,14 @@ This document describes Plack::Middleware::MangleEnv version {{\[ version
 
 # DESCRIPTION
 
-This module allows you to mangle [Plack](https://metacpan.org/pod/Plack)'s `$env` that is passed along
+This module allows you to reshape [Plack](https://metacpan.org/pod/Plack)'s `$env` that is passed along
 to the sequence of _app_s, taking values from an interpolation of items
 in `%ENV` and `$env`.
 
 At the most basic level, it allows you to get selected values from the
 environment and override some values in `$env` accordingly. For
 example, if you want to use environment variables to configure a reverse
-proxy setup, you can use the following mangler definitions:
+proxy setup, you can use the following revisor definitions:
 
     ...
     'psgi.url_scheme' => '[% ENV:RP_SCHEME %]',
@@ -176,32 +176,32 @@ You are not limited to taking values from the environment and peek into
 
 As you can understand, if you want to peek at other values in `$env`
 and these values are generated too, order matters! Take a look at
-["Ordering Manglers"](#ordering-manglers) to avoid being biten by this, but the bottom line
-is: use the array-reference form and put manglers in the order you want
+["Ordering Revisors"](#ordering-revisors) to avoid being biten by this, but the bottom line
+is: use the array-reference form and put revisors in the order you want
 them evaluated.
 
-## Defining Manglers
+## Defining Revisors
 
-There are multiple ways you can provide the definition of a mangler.
+There are multiple ways you can provide the definition of a revisor.
 Before explaining the details, it's useful to notice that you can invoke
-the constructor for `Plack::Middleware::MangleEnv` in different ways:
+the constructor for `Plack::Middleware::ReviseEnv` in different ways:
 
-    # the "hash" way, where %hash MUST NOT contain the "manglers" key
-    my $mwh  = Plack::Middleware::MangleEnv->new(%hash);
+    # the "hash" way, where %hash MUST NOT contain the "revisors" key
+    my $mwh  = Plack::Middleware::ReviseEnv->new(%hash);
 
     # the "hash reference" way
-    my $mwhr = Plack::Middleware::MangleEnv->new(manglers => \%hash);
+    my $mwhr = Plack::Middleware::ReviseEnv->new(revisors => \%hash);
 
     # the "array reference" way
-    my $mwar = Plack::Middleware::MangleEnv->new(manglers => \@array);
+    my $mwar = Plack::Middleware::ReviseEnv->new(revisors => \@array);
 
 The first two will be eventually turned into the last one by means of
 ["normalize\_input\_structure"](#normalize_input_structure) by simply putting the sequence of
 key/value pairs in the array, _ordered by key_.
 
-In the _array reference_ form, for each mangler you can provide:
+In the _array reference_ form, for each revisor you can provide:
 
-- a single hash reference with the details on the mangler (see below for
+- a single hash reference with the details on the revisor (see below for
 the explaination), OR
 - a string key (that we will call _external key_) and a hash reference.
 If the hash reference contains the key `key` (sorry!) then the
@@ -223,8 +223,8 @@ to key `key`. Example:
         { key => 'bar', value => 'baz' }
 
     This is useful when you start from the _hash_ or _hash-reference_
-    forms, because the _external key_ will be used for ordering manglers
-    only (see ["Ordering Manglers"](#ordering-manglers));
+    forms, because the _external key_ will be used for ordering revisors
+    only (see ["Ordering Revisors"](#ordering-revisors));
 
 - two strings, one for the key and one for the value. Example:
 
@@ -236,7 +236,7 @@ to key `key`. Example:
 
 While the normal key/value pairs should be sufficient in the general
 case, to trigger more advanced features you have to pass the whole hash
-reference definition for a manglers.  The hash can contain the following
+reference definition for a revisors.  The hash can contain the following
 keys:
 
 - `default_key`
@@ -269,12 +269,12 @@ keys:
 
 - `key`
 
-    the key that will be mangled in `$env`. It is a template itself, so it
+    the key that will be set in `$env`. It is a template itself, so it
     is subject to expansion and other rules explained here.
 
-    If you set the mangler with the key/value pair style, the key will be
+    If you set the revisor with the key/value pair style, the key will be
     used as the default value here; if you just provide a specification
-    mangler via a hash reference, you MUST provide a key though.
+    revisor via a hash reference, you MUST provide a key though.
 
 - `override`
 
@@ -291,7 +291,7 @@ keys:
     component is missing. Defaults to a false value, meaning that missing
     values are expanded as empty (but defined!) strings.
 
-    For example, consider the following manglers:
+    For example, consider the following revisors:
 
         ...
         inexistent => undef, # this removes inexistent from $env
@@ -323,7 +323,7 @@ keys:
 
 ## Templates
 
-Both the key and the value of a mangler are _templates_. They are
+Both the key and the value of a revisor are _templates_. They are
 initially _parsed_ (during `prepare_app`) and later _expanded_ when
 needed (i.e. during `call`).
 
@@ -395,7 +395,7 @@ You can set different _start_, _stop_ and _escape_ sequences by:
 - setting options `start`, `stop` and `esc` (respectively) in
 configuration hash `opts` in the constructor, or
 - setting options `start`, `stop` and `esc` (respectively) in the
-mangler definition (this takes precedence with respect to the ones in
+revisor definition (this takes precedence with respect to the ones in
 the `opts` for the object, of course).
 
 ### Expansion
@@ -410,7 +410,7 @@ expansion section itself. If the corresponding value is not present or
 is `undef`:
 
 - by default the empty string is used
-- if option `require_all` in the mangler definition is set to a (Perl)
+- if option `require_all` in the revisor definition is set to a (Perl)
 true value, the whole expansion _fails_ and returns `undef` or
 whatever default value has been set in `default_key` or
 `default_value` for keys and values respectively.
@@ -443,17 +443,17 @@ expansion are turned into empty strings:
 See ["Expansion"](#expansion) for making the above return `undef` (via
 `require_all`) and trigger the removal of `will_be_empty`.
 
-## Ordering Manglers
+## Ordering Revisors
 
 If you plan using intermediate variables for building up complex values,
-you might want to switch to the _array reference_ form of the mangler
-definition (see ["Defining Manglers"](#defining-manglers)), because the hash-based
+you might want to switch to the _array reference_ form of the revisor
+definition (see ["Defining Revisors"](#defining-revisors)), because the hash-based
 alternatives require more care.
 
 As an example, the following will NOT do what you think:
 
     # using plain hash way... and being BITEN HARD!
-    my $me = Plack::Middleware::MangleEnv->new(
+    my $me = Plack::Middleware::ReviseEnv->new(
        foo => 'FOO',
        bar => 'Hey [% env:foo %]',
     );
@@ -466,7 +466,7 @@ This is because the following array-based rendition will be used:
     ]
 
 i.e. `bar` will be eventually expanded _before_ `foo`. This is
-because keys are used for ordering manglers when transforming to the
+because keys are used for ordering revisors when transforming to the
 array-based form.
 
 The ordering part is actually there to help you, because by default Perl
@@ -475,15 +475,15 @@ list of key/value pairs. So, at least, in this case you have some
 guarantees!
 
 So what can you do? You can take advantage of the full form for defining
-a mangler, like this:
+a revisor, like this:
 
     # using plain hash way... more verbose but correct now
-    my $me = Plack::Middleware::MangleEnv->new(
+    my $me = Plack::Middleware::ReviseEnv->new(
        '1' => { key => foo => value => 'FOO' },
        '2' => { key => bar => value => 'Hey [% env:foo %]'},
     );
 
-The hash keys `1` and `2` will be used to order manglers, so they are
+The hash keys `1` and `2` will be used to order revisors, so they are
 set correctly now:
 
     [
@@ -491,7 +491,7 @@ set correctly now:
        '2' => { key => bar => value => 'Hey [% env:foo %]'},
     ]
 
-Note that the mangler definitions already contain a `key` field, so
+Note that the revisor definitions already contain a `key` field, so
 neither `1` nor `2` will be used to override this field, which is the
 same as the following array form:
 
@@ -537,28 +537,28 @@ cannot start with a space).
 
 Note that trimming targets only plain horizontal spaces (ASCII 0x20).
 
-## **generate\_mangler**
+## **generate\_revisor**
 
-    my $mangler = $obj->generate_mangler($input_definition);
+    my $revisor = $obj->generate_revisor($input_definition);
 
-Generate a mangler from an input definition.
+Generate a revisor from an input definition.
 
 The input definition MUST be a hash reference with fields explained in
-section ["Defining Manglers"](#defining-manglers).
+section ["Defining Revisors"](#defining-revisors).
 
-Returns a new mangler.
+Returns a new revisor.
 
-It is used by ["prepare\_app"](#prepare_app) to set the list of manglers that will be
+It is used by ["prepare\_app"](#prepare_app) to set the list of revisors that will be
 used during expansion.
 
 ## **new**
 
-    # Alternative 1, when %hash DOES NOT contain a "manglers" key
-    my $mw_h = Plack::Middleware::MangleEnv->new(%hash);
+    # Alternative 1, when %hash DOES NOT contain a "revisors" key
+    my $mw_h = Plack::Middleware::ReviseEnv->new(%hash);
 
-    # Alternative 2, "manglers" points to a hash ref
-    my $mw_r = Plack::Middleware::MangleEnv->new(
-       manglers => $hash_or_array_ref, # array ref is PREFERRED
+    # Alternative 2, "revisors" points to a hash ref
+    my $mw_r = Plack::Middleware::ReviseEnv->new(
+       revisors => $hash_or_array_ref, # array ref is PREFERRED
        opts     => \%hash_with_options
     )
 
@@ -572,29 +572,29 @@ from the environment (`%ENV`) and you're fine with the default options.
 
 The second form allows you to pass options, e.g. to change the
 delimiters for expansion sections, and also to define the sequence of
-manglers as an array reference, which is quite important if you are
-going to do fancy things (see ["Ordering Manglers"](#ordering-manglers) for example).
+revisors as an array reference, which is quite important if you are
+going to do fancy things (see ["Ordering Revisors"](#ordering-revisors) for example).
 
 Available opts are:
 
 - `esc`
 
     the escape sequence to use when parsing a template (see
-    ["Template rules"](#template-rules)). This can be overridden on a per-mangler basis.
+    ["Template rules"](#template-rules)). This can be overridden on a per-revisor basis.
 
     Defaults to a single backslash `\`.
 
 - `start`
 
     the start sequence to use when parsing a template (see
-    ["Template rules"](#template-rules)). This can be overridden on a per-mangler basis.
+    ["Template rules"](#template-rules)). This can be overridden on a per-revisor basis.
 
     Defaults to string `[%`, in [Template::Toolkit](https://metacpan.org/pod/Template::Toolkit) spirit.
 
 - `stop`
 
     the stop sequence to use when parsing a template (see
-    ["Template rules"](#template-rules)). This can be overridden on a per-mangler basis.
+    ["Template rules"](#template-rules)). This can be overridden on a per-revisor basis.
 
     Defaults to string `%]`, in [Template::Toolkit](https://metacpan.org/pod/Template::Toolkit) spirit.
 
@@ -605,10 +605,10 @@ Available opts are:
 normalizes the object internally landing you with the following fields:
 
 - `app`
-- `manglers`
+- `revisors`
 - `opts`
 
-where `manglers` is in the array form and `opts` has any missing item
+where `revisors` is in the array form and `opts` has any missing item
 initialised to the corresponding default (if not already present).
 
 ## **parse\_template**
@@ -631,7 +631,7 @@ This method is quite low-level and you have to explicitly pass the
 start, stop and escaping sequences, making sure they don't tread on each
 other.
 
-Used by ["generate\_mangler"](#generate_mangler).
+Used by ["generate\_revisor"](#generate_revisor).
 
 ## **unescape**
 

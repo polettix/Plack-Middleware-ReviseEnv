@@ -19,7 +19,7 @@ my $app = sub {
 };
 
 $app = builder {
-   enable 'MangleEnv',
+   enable 'ReviseEnv',
      some_value     => 'simple straight value',
      test_from_ENV  => '[% ENV:WHATEVER %]',
      test_from_env  => '[% env:REQUEST_METHOD %]',
@@ -110,7 +110,7 @@ test_psgi $app, sub {
       test_defport => ':8080',    # this was not cleared on purpose
       test_empty => '',
      },
-     'other mangled variables as expected'
+     'other revised variables as expected'
      or diag explain \%vars;
 };
 

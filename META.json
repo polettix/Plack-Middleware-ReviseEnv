@@ -1,5 +1,5 @@
 {
-   "abstract" : "Mangle request environment at will",
+   "abstract" : "Revise request environment at will",
    "author" : [
       "Flavio Poletti <polettix@cpan.org>"
    ],
@@ -12,7 +12,7 @@
       "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
       "version" : 2
    },
-   "name" : "Plack-Middleware-MangleEnv",
+   "name" : "Plack-Middleware-ReviseEnv",
    "no_index" : {
       "directory" : [
          "eg",
@@ -56,21 +56,21 @@
       }
    },
    "provides" : {
-      "Plack::Middleware::MangleEnv" : {
-         "file" : "lib/Plack/Middleware/MangleEnv.pm",
+      "Plack::Middleware::ReviseEnv" : {
+         "file" : "lib/Plack/Middleware/ReviseEnv.pm",
          "version" : "0.001"
       }
    },
    "release_status" : "stable",
    "resources" : {
       "bugtracker" : {
-         "web" : "https://github.com/polettix/Plack-Middleware-MangleEnv/issues"
+         "web" : "https://github.com/polettix/Plack-Middleware-ReviseEnv/issues"
       },
-      "homepage" : "https://github.com/polettix/Plack-Middleware-MangleEnv",
+      "homepage" : "https://github.com/polettix/Plack-Middleware-ReviseEnv",
       "repository" : {
          "type" : "git",
-         "url" : "https://github.com/polettix/Plack-Middleware-MangleEnv.git",
-         "web" : "https://github.com/polettix/Plack-Middleware-MangleEnv"
+         "url" : "https://github.com/polettix/Plack-Middleware-ReviseEnv.git",
+         "web" : "https://github.com/polettix/Plack-Middleware-ReviseEnv"
       }
    },
    "version" : "0.001",

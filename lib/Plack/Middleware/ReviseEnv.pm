@@ -1,4 +1,4 @@
-package Plack::Middleware::MangleEnv;
+package Plack::Middleware::ReviseEnv;
 
 use strict;
 use warnings;
@@ -11,10 +11,10 @@ use parent 'Plack::Middleware';
 sub call {
    my ($self, $env) = @_;
    my %vars = (env => $env, ENV => \%ENV);
- MANGLER:
-   for my $mangler (@{$self->{manglers} || []}) {
+ REVISOR:
+   for my $revisor (@{$self->{revisors} || []}) {
       my ($key, $value) = map {
-         my $def_parts = $mangler->{$_};
+         my $def_parts = $revisor->{$_};
          my $retval;
          if (defined $def_parts) {
             my $all_defs = 1;
@@ -25,25 +25,25 @@ sub call {
                  : undef;
             } @$def_parts;
 
-            if ($mangler->{require_all} && (!$all_defs)) {
+            if ($revisor->{require_all} && (!$all_defs)) {
                $retval = undef;
             }
             else {
                $retval = join '', @parts;
             }
-         } ## end if (defined $_)
-         $retval = $mangler->{'default_' . $_}
-            if (! defined($retval))
-            || ((length($retval) == 0) && $mangler->{empty_as_default});
+         } ## end if (defined $def_parts)
+         $retval = $revisor->{'default_' . $_}
+           if (!defined($retval))
+           || ((length($retval) == 0) && $revisor->{empty_as_default});
          $retval;
       } qw< key value >;
 
       next unless defined $key;
 
       $env->{$key} = $value
-        if $mangler->{override} || (!exists($env->{$key}));
+        if $revisor->{override} || (!exists($env->{$key}));
       delete $env->{$key} unless defined $value;
-   } ## end MANGLER: for my $mangler (@{$self...})
+   } ## end REVISOR: for my $revisor (@{$self...})
 
    return $self->app()->($env);
 } ## end sub call
@@ -53,34 +53,34 @@ sub call {
 sub prepare_app {
    my ($self) = @_;
    $self->normalize_input_structure();    # reorganize internally
-   my @inputs = @{delete $self->{manglers}}; # we will consume @inputs
-   my @manglers;
+   my @inputs = @{delete $self->{revisors}};    # we will consume @inputs
+   my @revisors;
 
    while (@inputs) {
       my $spec = shift @inputs;
 
       # allow for key => value or \%spec
       if (!ref($spec)) {
-         confess "stray mangler '$spec'" unless @inputs;
+         confess "stray revisor '$spec'" unless @inputs;
          (my $key, $spec) = ($spec, shift @inputs);
          $spec = {value => $spec} unless ref($spec) eq 'HASH';
 
          # override key only if not already present. The external key
-         # can then be used for ordering manglers also in the hash
+         # can then be used for ordering revisors also in the hash
          # scenario
          $spec->{key} = $key unless defined $spec->{key};
       } ## end if (!ref($spec))
 
-      push @manglers, $self->generate_mangler($spec);
+      push @revisors, $self->generate_revisor($spec);
    } ## end while (@inputs)
 
    # if we arrived here, it's safe
-   $self->{manglers} = \@manglers;
+   $self->{revisors} = \@revisors;
 
    return $self;
 } ## end sub prepare_app
 
-sub generate_mangler {
+sub generate_revisor {
    my ($self, $spec) = @_;
    confess "one spec has no (defined) key" unless defined $spec->{key};
 
@@ -100,11 +100,11 @@ sub generate_mangler {
 
    my %m = %$spec;
    $m{override} = 1 unless exists $m{override};
-   $m{key}      = $self->parse_template($m{key},   $start, $stop, $esc);
-   $m{value}    = $self->parse_template($m{value}, $start, $stop, $esc);
+   $m{key}   = $self->parse_template($m{key},   $start, $stop, $esc);
+   $m{value} = $self->parse_template($m{value}, $start, $stop, $esc);
 
    return \%m;
-} ## end sub generate_mangler
+} ## end sub generate_revisor
 
 sub parse_template {
    my ($self, $template, $start, $stop, $esc) = @_;
@@ -206,7 +206,6 @@ sub escaped_index {
       # to honor the escaping and restart the quest past the escaped char
       $pos = $epos + length($escaper) + 1;
 
-
    } ## end while ($pos < $len)
 
    return -1 if $pos == $len;
@@ -224,8 +223,8 @@ sub normalize_input_structure {
    $opts->{stop}  ||= '%]';
    $opts->{esc}   ||= '\\';
 
-   my $manglers = exists($self->{manglers})
-     ? delete($self->{manglers})            # just take it
+   my $revisors = exists($self->{revisors})
+     ? delete($self->{revisors})            # just take it
      : __exhaust_hash($self);               # or move stuff out of $self
 
    # Fun fact: __exhaust_hash($self) could have been written as:
@@ -239,12 +238,12 @@ sub normalize_input_structure {
       confess "stray keys found: @keys";
    }
 
-   $manglers = [map { $_ => $manglers->{$_} } sort keys %$manglers]
-     if ref($manglers) eq 'HASH';
+   $revisors = [map { $_ => $revisors->{$_} } sort keys %$revisors]
+     if ref($revisors) eq 'HASH';
 
    %$self = (
       app      => $app,
-      manglers => $manglers,
+      revisors => $revisors,
       opts     => $opts,
    );
    return $self;

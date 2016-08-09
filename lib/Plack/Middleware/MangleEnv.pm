@@ -18,18 +18,19 @@ sub call {
          if (defined $_) {
             my $all_defs = 1;
             my @parts = grep { defined($_) ? 1 : ($all_defs = 0) } map {
-               (! ref($_)) ? $_
-               : exists($vars{$_->{src}}{$_->{key}}) ?
-                 $vars{$_->{src}}{$_->{key}} : undef;
+               (!ref($_)) ? $_
+                 : exists($vars{$_->{src}}{$_->{key}})
+                 ? $vars{$_->{src}}{$_->{key}}
+                 : undef;
             } @$_;
 
-            if ($mangler->{require_all} && (! $all_defs)) {
+            if ($mangler->{require_all} && (!$all_defs)) {
                $retval = undef;
             }
             else {
                $retval = join '', @parts;
             }
-         }
+         } ## end if (defined $_)
          $retval;
       } @{$mangler}{qw< key value >};
       $env->{$key} = $value
@@ -80,20 +81,20 @@ sub generate_mangler {
    my $start = defined($spec->{start}) ? $spec->{start} : $opts->{start};
    confess "start sequence cannot be empty" unless length $start;
 
-   my $stop  = defined($spec->{stop})  ? $spec->{stop}  : $opts->{stop};
+   my $stop = defined($spec->{stop}) ? $spec->{stop} : $opts->{stop};
    confess "stop sequence cannot be empty" unless length $stop;
 
-   my $esc   = defined($spec->{esc})   ? $spec->{esc}   : $opts->{esc};
+   my $esc = defined($spec->{esc}) ? $spec->{esc} : $opts->{esc};
    confess "escape sequence cannot be empty" unless length $esc;
    confess "escape sequence cannot start with a space, sorry"
-      if substr($esc, 0, 1) eq ' ';
+     if substr($esc, 0, 1) eq ' ';
    confess "escape sequence cannot be equal to start or stop sequence"
      if ($esc eq $start) || ($esc eq $stop);
 
    return {
       override => (exists($spec->{override}) ? $spec->{override} : 1),
       require_all => $spec->{require_all},
-      key   => $self->parse_template($spec->{key},   $start, $stop, $esc),
+      key => $self->parse_template($spec->{key}, $start, $stop, $esc),
       value => $self->parse_template($spec->{value}, $start, $stop, $esc),
    };
 } ## end sub generate_mangler
@@ -111,7 +112,7 @@ sub parse_template {
       my $i = $self->escaped_index($template, $start, $esc, $pos);
       my $text = substr $template, $pos, ($i < 0 ? $len : $i) - $pos;
       push @chunks, $self->unescape($text, $esc);
-      last CHUNK if $i < 0; # nothing more left to search
+      last CHUNK if $i < 0;    # nothing more left to search
 
       # advance position marker immediately after start sequence
       $pos = $i + length $start;
@@ -131,11 +132,11 @@ sub parse_template {
          confess "chunk '$chunk' is not quoted properly"
            unless ($len > 1) && (substr($chunk, -1, 1) eq $quote);
          $chunk = substr $chunk, 1, $clen - 2;
-      }
+      } ## end if (my ($quote) = $chunk...)
 
       my ($src, $key) = split /:/, $chunk, 2;
       confess "invalid source '$src' in chunk '$chunk'"
-         if ($src ne 'env') && ($src ne 'ENV');
+        if ($src ne 'env') && ($src ne 'ENV');
       confess "no key in chunk '$chunk'" unless defined $key;
       push @chunks, {src => $src, key => $key};
 
@@ -155,20 +156,20 @@ sub unescape {
 
 sub escaped_trim {
    my ($self, $str, $esc) = @_;
-   $str =~ s{\A\s+}{}mxs; # trimming the initial part is easy
+   $str =~ s{\A\s+}{}mxs;    # trimming the initial part is easy
 
    my $pos = 0;
    while ('necessary') {
 
       # find next un-escaped space
       my $i = $self->escaped_index($str, ' ', $esc, $pos);
-      last if $i < 0; # no further spaces... nothing to trim
+      last if $i < 0;        # no further spaces... nothing to trim
 
       # now look for escapes after that, because we're interested only
       # in un-escaped spaces at the end of $str
       my $e = index $str, $esc, $i + 1;
 
-      if ($e < 0) { # no escapes past last space found
+      if ($e < 0) {    # no escapes past last space found
 
          # Now we split our string at $i, which represents the first
          # space character that is not escaped and has no escapes after it.
@@ -179,16 +180,16 @@ sub escaped_trim {
 
          # merge the two parts back and we're good to go
          return $keep . $str;
-      }
+      } ## end if ($e < 0)
 
       # we found an escape sequence after the last space we found, we have
       # to look further past this escape sequence
       $pos = $e + length $esc;
-   }
+   } ## end while ('necessary')
 
    # no trailing spaces to be trimmed found, $str is fine
    return $str;
-}
+} ## end sub escaped_trim
 
 sub escaped_index {
    my ($self, $str, $delimiter, $escaper, $pos) = @_;
@@ -196,33 +197,33 @@ sub escaped_index {
 
    my $len = length $str;
    while ($pos < $len) {
-      my $dpos = index $str, $delimiter, $pos; # next delimiter
-      my $epos = index $str, $escaper, $pos;   # next escaper
+      my $dpos = index $str, $delimiter, $pos;    # next delimiter
+      my $epos = index $str, $escaper,   $pos;    # next escaper
       return $dpos
-        if ($dpos < 0)      # didn't find it
-        || ($epos < 0)      # nothing escaped at all
-        || ($dpos < $epos); # nothing escaped before it
+        if ($dpos < 0)                            # didn't find it
+        || ($epos < 0)         # nothing escaped at all
+        || ($dpos < $epos);    # nothing escaped before it
 
       # there's an escaper occurrence *before* a delimiter, so we have
       # to honor the escaping and restart the quest past the escaped char
       $pos = $epos + length($escaper) + 1;
-   } ## end while ('necessary')
+   } ## end while ($pos < $len)
 
    confess "stray escaping in '$str'";
-} ## end sub _escaped_index
+} ## end sub escaped_index
 
 sub normalize_input_structure {
    my ($self) = @_;
 
-   my $app = delete $self->{app};    # temporarily remove these keys
+   my $app = delete $self->{app};           # temporarily remove these keys
    my $opts = delete($self->{opts}) || {};
    $opts->{start} ||= '[%';
    $opts->{stop}  ||= '%]';
    $opts->{esc}   ||= '\\';
 
    my $manglers = exists($self->{manglers})
-     ? delete($self->{manglers})   # just take it
-     : __exhaust_hash($self);       # or move stuff out of $self
+     ? delete($self->{manglers})            # just take it
+     : __exhaust_hash($self);               # or move stuff out of $self
 
    # Fun fact: __exhaust_hash($self) could have been written as:
    #
@@ -235,7 +236,7 @@ sub normalize_input_structure {
       confess "stray keys found: @keys";
    }
 
-   $manglers = [map{ $_ => $manglers->{$_} } sort keys %$manglers]
+   $manglers = [map { $_ => $manglers->{$_} } sort keys %$manglers]
      if ref($manglers) eq 'HASH';
 
    %$self = (
@@ -244,7 +245,7 @@ sub normalize_input_structure {
       opts     => $opts,
    );
    return $self;
-} ## end sub _normalize_input_structure
+} ## end sub normalize_input_structure
 
 # _PRIVATE_ convenience functions
 
@@ -258,13 +259,13 @@ sub __stringified_list {
          'undef';
       }
    } @_;
-}
+} ## end sub __stringified_list
 
 sub __exhaust_hash {
    my ($target) = @_;
    my $retval = {%$target};
    %$target = ();
    return $retval;
-}
+} ## end sub __exhaust_hash
 
 1;

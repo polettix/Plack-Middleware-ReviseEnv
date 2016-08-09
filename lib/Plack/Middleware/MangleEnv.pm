@@ -37,6 +37,9 @@ sub call {
             || ((length($retval) == 0) && $mangler->{empty_as_default});
          $retval;
       } qw< key value >;
+
+      next unless defined $key;
+
       $env->{$key} = $value
         if $mangler->{override} || (!exists($env->{$key}));
       delete $env->{$key} unless defined $value;

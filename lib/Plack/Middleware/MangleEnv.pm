@@ -187,8 +187,8 @@ sub escaped_trim {
       } ## end if ($e < 0)
 
       # we found an escape sequence after the last space we found, we have
-      # to look further past this escape sequence
-      $pos = $e + length $esc;
+      # to look further past this escape sequence and the char it escapes
+      $pos = $e + length($esc) + 1;
    } ## end while ('necessary')
 
    # no trailing spaces to be trimmed found, $str is fine
@@ -197,7 +197,6 @@ sub escaped_trim {
 
 sub escaped_index {
    my ($self, $str, $delimiter, $escaper, $pos) = @_;
-   defined $escaper or confess "here";
 
    my $len = length $str;
    while ($pos < $len) {
@@ -211,8 +210,13 @@ sub escaped_index {
       # there's an escaper occurrence *before* a delimiter, so we have
       # to honor the escaping and restart the quest past the escaped char
       $pos = $epos + length($escaper) + 1;
+
+
    } ## end while ($pos < $len)
 
+   return -1 if $pos == $len;
+
+   # we got past the end of the string, there's an escaper at the end
    confess "stray escaping in '$str'";
 } ## end sub escaped_index
 

@@ -17,358 +17,554 @@ This document describes Plack::Middleware::MangleEnv version {{[ version
 
    my $mw = Plack::Middleware::MangleEnv->new(
 
-      # overriding is the default behaviour
+      # straight value
+      var1 => 'a simple, overriding value',
 
-      # straight value, must be a plain SCALAR (no refs)
-      var_name    => 'a simple, overriding value',
+      # value from %ENV
+      var2 => '[% ENV:USER %]',
 
-      # any value can be wrapped, even refs
-      some_value  => [ \@whatever ],
+      # value from other element in $env
+      var3 => '[% env:foobar %]',
 
-      # or you can be just explicit
-      alternative => { value => $whatever },
+      # mix and match, values are templates actually
+      var4 => 'Hey [% ENV:USER %] this is [% env:var1 %]',
 
-      # you can read stuff from %ENV
-      from_ENV    => { ENV => 'PLACK_ENV' },
+      # to delete an element just "undef" it
+      X_REMOVE_ME => undef,
 
-      # or read other variables from $env
-      from_env    => { env => 'psgi.url_scheme' },
+      # overriding is the default behaviour, but you can disable it
+      X_FOO => {
+         value => 'Get this by default',
+         override => 0,
+      },
 
-      # turn override into defaulting, works with value, env and ENV
-      de_fault    => { value => $something, override => 0 },
+      # the key is a template too!
+      '[% ENV:USER %]' => '[% ENV:HOME %]',
 
-      # get rid of a variable, inconditionally. You can pass
-      # no value or be explicit about your intent
-      delete_pliz => [],
-      delete_me   => { remove => 1 },
+      # the "key" can be specified inside, ignoring the "outer" one
+      IGNORED_KEY => {
+         key => 'THIS IS THE KEY!',
+         value => 'whatever',
+      },
 
-      # use subroutines for maximum flexibility.
-      change_me1  => sub { ... },
-      change_me2  => { sub => sub { ... } },
+      # more examples and features below in example with array ref
 
    );
 
    # you can also pass the key/value pairs as a hash reference
    # associated to a key named 'manglers'. This is necessary e.g. if
-   # you want to set a variable in $env with name 'app' (or 'manglers'
-   # itself)
-   my $mw2 = Plack::Middleware::MangleEnv->new(
-      manglers => {
-         what => 'EVER',
-         who  => 'are you?',
-      }
-   );
+   # you want to set a variable in $env with name 'app', 'opts' or
+   # 'manglers'
+   my $mw2 = Plack::Middleware::MangleEnv->new(manglers => \%manglers);
 
    # when evaluation order or repetition is important... use an array
-   # reference for 'manglers'
+   # reference for 'manglers'. You can also avoid passing the external
+   # key here, and just provide a sequence of hash definitions
    my $mw3 = Plack::Middleware::MangleEnv->new(
       manglers => [
-         same_as => 'before', # set this at the beginning...
-         what => {env => 'same_as'},
-         ...,
-         same_as => [], # ... and delete this at the end
+         KEY => { ... specification ... },
+
+         # by default inexistent/undef inputs are expanded as empty
+         # strings.
+         {
+            key => 'weird',
+            value => '[% ENV:HOST %]:[% ENV:UNDEFINED %]',
+
+            # %ENV = (HOST => 'www.example.com'); # no UNDEFINED
+            # # weird => 'www.example.com:' # note trailing colon...
+         },
+
+         # you can "fail" generating a variable if something is missing,
+         # so you can avoid the trailing colon above in two steps:
+         {
+            key => 'correct_port_spec',
+            value => ':[% ENV:PORT %]',
+            require_all => 1,
+
+            # %ENV = (); # no PORT
+            # # -> no "correct_port_spec" is generated in $env
+
+            # %ENV = (PORT => 8080);
+            # # correct_port_spec => ':8080'
+         },
+         {
+            key => 'host_and_port',
+            value => '[% ENV:HOST %][% env:correct_port_spec %]',
+
+            # %ENV = (HOST => 'www.example.com'); # no PORT
+            # # host_and_port => 'www.example.com'
+
+            # %ENV = (HOST => 'www.example.com', PORT => 8080);
+            # # host_and_port => 'www.example.com:8080'
+         }
+
+         # the default value is "undef" which ultimately means "do not
+         # generate" or "delete if existent". You can set a different
+         # one for the key and the value separately
+         {
+            key         => '[% ENV:USER %]',
+            default_key => 'nobody',
+
+            value         => '[% ENV:HOME %]',
+            default_value => '/tmp',
+         },
+
+         # the default is applied only when the outcome is "undef", but
+         # you can extend it to the empty string too. This is useful to
+         # obtain the same effect of shell's test [ -z "$VAR" ] which is
+         # true both for missing and empty values
+         {
+            key         => '[% ENV:USER %]',
+            default_key => 'nobody',
+
+            value         => '[% ENV:HOME %]',
+            default_value => '/tmp',
+
+            empty_as_default => 1,
+         }
+
+         # We can revisit the example on host/port and set defaults for
+         # the missing variables, using two temporary variables that
+         # will be cleared afterwards
+         {
+            key => '_host',
+            value => '[% ENV:HOST %]',
+            default_value => 'www.example.com',
+            empty_as_default => 1,
+         },
+         {
+            key => '_port',
+            value => '[% ENV:PORT %]',
+            default_value => '8080',
+            empty_as_default => 1,
+         },
+         host_and_port => '[% env:_host %]:[% env:_port %]',
+         _host => undef, # clear temporary variable
+         _port => undef, # ditto
       ]
    );
 
 =head1 DESCRIPTION
 
 This module allows you to mangle L<Plack>'s C<$env> that is passed along
-to the sequence of I<app>s, taking values from:
+to the sequence of I<app>s, taking values from an interpolation of items
+in C<%ENV> and C<$env>.
+
+At the most basic level, it allows you to get selected values from the
+environment and override some values in C<$env> accordingly. For
+example, if you want to use environment variables to configure a reverse
+proxy setup, you can use the following mangler definitions:
+
+   ...
+   'psgi.url_scheme' => '[% ENV:RP_SCHEME %]',
+   'HTTP_HOST'       => '[% ENV:RP_HOST   %]',
+   'SCRIPT_NAME'     => '[% ENV:RP_PATH   %]',
+   ...
+
+This would basically implement the functionality provided by
+L<Dancer::Middleware::Rebase> (without the C<strip> capabilities).
+
+Value definitions are actually templates with normal text and variables
+expansions between delimiters. So, the following definition does what
+you think:
+
+   salutation => 'Hello, [% ENV:USER %], welcome [% ENV:HOME %]',
+
+You are not limited to taking values from the environment and peek into
+C<$env> too:
+
+   ...
+   bar => 'baz', # no expansion in this template, just returns 'bar'
+   foo => '[% env:bar %]',
+   ...
+
+As you can understand, if you want to peek at other values in C<$env>
+and these values are generated too, order matters! Take a look at
+L</Ordering Manglers> to avoid being biten by this, but the bottom line
+is: use the array-reference form and put manglers in the order you want
+them evaluated.
+
+=head2 Defining Manglers
+
+There are multiple ways you can provide the definition of a mangler.
+Before explaining the details, it's useful to notice that you can invoke
+the constructor for C<Plack::Middleware::MangleEnv> in different ways:
+
+   # the "hash" way, where %hash MUST NOT contain the "manglers" key
+   my $mwh  = Plack::Middleware::MangleEnv->new(%hash);
+
+   # the "hash reference" way
+   my $mwhr = Plack::Middleware::MangleEnv->new(manglers => \%hash);
+
+   # the "array reference" way
+   my $mwar = Plack::Middleware::MangleEnv->new(manglers => \@array);
+
+The first two will be eventually turned into the last one by means of
+L</normalize_input_structure> by simply putting the sequence of
+key/value pairs in the array, I<ordered by key>.
+
+In the I<array reference> form, for each mangler you can provide:
 
 =over
 
 =item *
 
-direct configuration;
+a single hash reference with the details on the mangler (see below for
+the explaination), OR
 
 =item *
 
-values from C<%ENV>;
+a string key (that we will call I<external key>) and a hash reference.
+If the hash reference contains the key C<key> (sorry!) then the
+C<external key> will be ignored, otherwise it will be set corresponding
+to key C<key>. Example:
+
+   foo => { value => 'ciao' }
+
+is interpreted as:
+
+   { key => 'foo', value => 'ciao' }
+
+while:
+
+   foo => { key => 'bar', value => 'baz' }
+
+is interpreted as:
+
+   { key => 'bar', value => 'baz' }
+
+This is useful when you start from the I<hash> or I<hash-reference>
+forms, because the I<external key> will be used for ordering manglers
+only (see L</Ordering Manglers>);
 
 =item *
 
-other values in C<$env> itself;
+two strings, one for the key and one for the value. Example:
 
-=item *
+   foo => 'bar'
 
-subroutines.
+is interpreted as:
+
+   { key => 'foo', value => 'bar' }
 
 =back
 
-=head2 How Variables Are Set
-
-The end goal of this middleware module is to manipulate C<$env> by
-adding, changing or deleting its items.
-
-You can pass the different actions to be performed as key-value pairs.
-They can either appear directly upon invoking the middleware, as in the
-following example:
-
-   my $mw = Plack::Middleware::MangleEnv->new(
-      var_name    => 'a simple, overriding value',
-      some_value  => [ \@whatever ],
-      alternative => { value => $whatever },
-      # ... you get the idea
-   );
-
-or wrap these pairs inside either an hash or an array reference whose
-key is C<manglers>, like in the following examples:
-
-   my $mw_h = Plack::Middleware::MangleEnv->new(
-      manglers => {
-         var_name    => 'a simple, overriding value',
-         some_value  => [ \@whatever ],
-         alternative => { value => $whatever },
-         # ... you get the idea
-      }
-   );
-
-   my $mw_a = Plack::Middleware::MangleEnv->new(
-      manglers => [
-         var_name    => 'a simple, overriding value',
-         some_value  => [ \@whatever ],
-         alternative => { value => $whatever },
-         # ... you get the idea
-      ]
-   );
-
-Although more verbose, this last approach with an array reference is
-important because it allows you to:
+While the normal key/value pairs should be sufficient in the general
+case, to trigger more advanced features you have to pass the whole hash
+reference definition for a manglers.  The hash can contain the following
+keys:
 
 =over
 
-=item *
+=item C<default_key>
 
-define the exact order of evaluation for mangling actions;
+=item C<default_value>
 
-=item *
+when the computed value for either the key or the value are undefined,
+the corresponding key is deleted. If you set a defined value, this will
+be used instead.
 
-define multiple actions for the same key, possibly at different stages;
+Setting a default value makes sense only if either C<empty_as_default>
+or C<require_all> are set too; otherwise, whatever expansion will always
+yield a defined value (possibly empty).
 
-=item *
+=item C<empty_as_default>
 
-use keys C<manglers> and C<app>, if you need them.
+when the computed value is empty, treat it as it were undefined. This is
+a single setting for both key and value.
 
-=back
+It is useful if you suspect that your environment might actually contain
+a variable, but with an empty value that you want to override with a
+default.
 
-There's a wide range of possible I<values> that you can set associated
-to a key:
+=item C<esc>
 
-=over
+the escape character to use when parsing templates. It defaults to a
+single backslash, but you can override this with a different string as
+long as it's not empty, it does not start with a space and is different
+from both C<start> and C<stop> (see below) values. This might come handy
+in the (unlikely) case that you must use lots of backslashes.
 
-=item B<< Simple scalar >>
+=item C<key>
 
-   key => 'some simple, non-reference scalar',
+the key that will be mangled in C<$env>. It is a template itself, so it
+is subject to expansion and other rules explained here.
 
-a I<non-reference> scalar is always taken as-is and then set in C<$env>.
-
-=item B<< Array reference >>
-
-   key => [],
-   key => [ { 'a non' => 'trivial scalar' } ],
-
-when you pass an array reference, it can be either empty (in which case
-the associated key will be I<removed> from C<$env>) or contain exactly
-one value, which will be set into C<$env>.
-
-This alternative allows you to set any scalar, not just non-reference
-ones; so the following examples will do what they say:
-
-   # set key to an array ref with numbers 1..3 inside
-   key => [ [1..3] ], # note: array ref inside array ref!
-
-   # set key to a hash reference, literally
-   key => [ { a => 'b', c => 'd' } ],
-
-   # set key to a sub reference, literally
-   key => [ sub { 'I go with key!' } ],
-
-=item B<< Sub reference >>
-
-   key => sub { ... },
-
-the sub reference will be called and its return value used to figure out
-the value to associate to the key. See L</Sub Reference Interface> for
-details on the expected interface for the sub;
-
-=item B<< Hash reference >>
-
-allows you to be I<verbosely clear> about what you want, in addition to
-giving you knobs to modify the behaviour. The allowed keys are the
-following:
-
-=over
-
-=item C<env>
-
-points to a string that will be used to extract the value from C<$env>
-itself. Useful if you want to I<change the name> of a parameter;
-
-=item C<ENV>
-
-points to a string that will be used to extract the value from C<%ENV>.
-Useful if you want to get some variables from the environment.
-
-=item C<list>
-
-points to a hash of configurations to build and handle a list of other
-I<sources> (i.e. C<env>, C<ENV> or C<value>).
-
-It collects data from a list of C<sources>, optionally C<flatten>inig
-them (if they are array or hash references), filtering them (e.g. to set
-default values for C<undef> or empty strings, or removing unwanted
-elements), then optionally C<join>inig them or passing them to
-C<sprintf>. See L</generate_hash_manglers_list> for the details on this
-hash and of each element in C<sources>.
-
-For example, consider the following definition:
-
-   ...
-   connect_string => {
-      list => {
-         default => [], # remove undefined values
-         join => ':',   # join with ":"
-         sources => [
-            {ENV => 'HOST'},
-            {ENV => 'PORT'}
-         ],
-      }
-   }
-   ...
-
-The following applies:
-
-   %ENV = (HOST => 'localhost'); # leave PORT undefined
-   --> $env->{connect_string} = 'localhost';
-
-   %ENV = (HOST => 'localhost', PORT => 80);
-   --> $env->{connect_string} = 'localhost:80';
-
-Something similar happens with C<sprintf>, although the format is
-stricter in this case and we have to address this with defaults:
-
-   ...
-   connect_string => {
-      list => {
-         default => [], # remove undefined values
-         sprintf => '%s:%s',
-         sources => [
-            {ENV => 'HOST', default => 'www.example.com'},
-            {ENV => 'PORT', default => 80},
-         ],
-      }
-   }
-   ...
-
-   %ENV = ();
-   --> $env->{connect_string} = 'www.example.com:80';
-
-   %ENV = (HOST => 'localhost', PORT => 443);
-   --> $env->{connect_string} = 'localhost:443';
-
-In addition to plain strings, you can also set either C<join> or
-C<sprintf> (never the two at the same time!) with a I<source>
-specification with C<env>, C<ENV> or C<value>:
-
-   ...
-   sprintf_template => '%s:%s', # ends up in $env
-   connect_string => {
-      list => {
-         default => [], # remove undefined values
-         sprintf => {env => 'sprintf_template'},
-         sources => [
-            {ENV => 'HOST', default => 'www.example.com'},
-            {ENV => 'PORT', default => 80},
-         ],
-      }
-   }
-   ...
-   # same as before here
-
+If you set the mangler with the key/value pair style, the key will be
+used as the default value here; if you just provide a specification
+mangler via a hash reference, you MUST provide a key though.
 
 =item C<override>
 
-boolean flag that indicates whether the new value overrides a previous
-one, if any. Set to a false value to avoid overriding an existing value,
-while still being able to provide a default one if the key is missing
-from C<$env>.
+boolean flag to indicate that you want to overwrite any previously
+existing value in C<$env> for a specific computed key.
 
-Defaults to a true value;
+It defaults to I<true>, but you can set it to e.g. C<0> to disable
+overriding and set the value in C<$env> only if there's nothing there
+already.
 
-=item C<sub>
+=item C<require_all>
 
-set a subroutine, see L</Sub Reference Interface> for details;
+boolean flag that makes an expansion I<fail> (returning C<undef>) if any
+component is missing. Defaults to a false value, meaning that missing
+values are expanded as empty (but defined!) strings.
+
+For example, consider the following manglers:
+
+   ...
+   inexistent => undef, # this removes inexistent from $env
+
+   set_but_awww => 'Foo: [% env:inexistent %]',
+
+   not_set_at_all => {
+      value => 'Foo: [% env:inexistent %]',
+      require_all => 1,
+   },
+   ...
+
+As a final result, C<< $env->{set_but_empty} >> ends up being
+present with value C<Foo: >, while C<< $env->{not_set_at_all} >> is
+not set or deleted if present.
+
+This can be also combined with C<default_key> or C<default_value>.
+
+=item C<start>
+
+=item C<stop>
+
+the delimiters for the expansion sections, defaulting to C<[%> and C<%]>
+respectively (or whatever option was set in C<opts> at object creation).
+You can override them with any non-empty string.
 
 =item C<value>
 
-set a value that is not a simple plain scalar:
-
-   # set key to an array ref with numbers 1..3 inside
-   key => { value => [1..3] },
-
-   # set key to a hash reference, literally
-   key => { value => { a => 'b', c => 'd' } },
-
-   # set key to a sub reference, literally
-   key => { value => sub { 'I go with key!' } },
+the template for the value.
 
 =back
 
-Exactly one of the keys C<env>, C<ENV>, C<list>, C<sub> and C<value>
-MUST appear in the hash reference. For obvious reasons, you cannot
-provide more of them, otherwise a conflict would arise.
+=head2 Templates
 
-=back
+Both the key and the value of a mangler are I<templates>. They are
+initially I<parsed> (during C<prepare_app>) and later I<expanded> when
+needed (i.e. during C<call>).
 
+The parsing verifies that the template adheres to the
+L</Template rules>; the expansion is explained in section
+L</Expansion>.
 
-=head2 Sub Reference Interface
+=head3 Template rules
 
-The most flexible way to mangle C<$env> is through a subroutine. It can
-be provided either directly associated to the key, or through the C<sub>
-sub-key in the hash associated to the key.
+Templates are a sequence of plain text and variable expansion sections.
+The latter ones are delimited by a I<start> and I<stop> character
+sequence. So, for example, with the default start and stop markers the
+following text:
 
-The provided subroutine reference will be called like this:
+   Foo [% ENV:BAR %] baz
 
-   sub {
-      my ($current_value, $env, $key) = @_;
-      # do what you need
-      return @something;
-   }
+is interpreted as:
 
-The I<sub> can modify C<$env> at will, e.g. by adding new keys or
-removing other ones based on your specific logic.
+   plain text        'Foo '
+   expansion section ' ENV:BAR '
+   plain text        ' baz'
 
-If you don't return anything, or the C<undef> value, the corresponding
-C<$key> in C<$env> will be left untouched, keeping its previous value
-(if any).  Otherwise, you are supposed to return one single value that
-can be:
+Plain text sections can contain whatever character sequences, except
+(unescaped) start for a variable expansion section. If you want to
+include a start sequence, prepend it with an I<escape> sequence
+(defaulting to a single backslash), like this:
+
+   Foo \[% ENV:BAR %] baz
+
+is interpreted as:
+
+   plain text 'Foo \[% ENV:BAR %] baz'
+
+The I<escape> just makes the character immediately following it be
+ignored during parsing, which happens in the expansion sections too. So,
+suppose that you have a variable whose name contains the end sequence,
+you can still use it like this:
+
+   Foo [% env:bar \%] %] baz
+
+is interpreted as:
+
+   plain text        'Foo '
+   expansion section ' env:bar \%] '
+   plain text        ' baz'
+
+After dividing the input template into sections, the plain text sections
+are just unescaped, while the expansion sections are futher analyzed:
 
 =over
 
 =item *
 
-B<not> an array reference, in which case it is used as the value
-associated to C<$key> in C<$env>;
+the section string is trimmed while still honoring escape characters
+(i.e. escaped trailing spaces are I<kept>, even if it can sound crazy);
 
 =item *
 
-an array reference. If the array is empty, the C<$key> is removed from
-C<$env>; otherwise, it MUST contain exactly one value, used to set the
-key C<$key> in C<$env> (which also allows you to set as output an array
-reference, even an empty one).
+then it is unescaped;
+
+=item *
+
+then it is split into two components separated by a colon, checking that
+the first part is either C<ENV> or C<env> (the source for the expansion)
+and the second is the name of the item inside the source.
 
 =back
 
-Examples:
+Example:
 
-   # nothing happens with this
-   sub { return }
+                      ' ENV:FOO\ \  '
+     trimmed to   --> 'ENV:FOO\ \ '
+     unescaped to --> 'ENV:FOO  '
+     split to     --> 'ENV', 'FOO  '
 
-   # key is removed from $env
-   sub { return [] }
+In the example, the expansion section will be used to get the value of
+item C<FOO  > (with two trailing spaces) from C<%ENV>.
 
-   # key is set to an empty array in $env
-   sub { return [[]] }
+You can set different I<start>, I<stop> and I<escape> sequences by:
+
+=over
+
+=item *
+
+setting options C<start>, C<stop> and C<esc> (respectively) in
+configuration hash C<opts> in the constructor, or
+
+=item *
+
+setting options C<start>, C<stop> and C<esc> (respectively) in the
+mangler definition (this takes precedence with respect to the ones in
+the C<opts> for the object, of course).
+
+=back
+
+
+=head3 Expansion
+
+While parsing happens once, expansion of templates happens every time
+the C<call> method is invoked, which should mean at each request hitting
+Plack.
+
+During expansion, text parts are passed verbatim, while expansion
+sections take the value from either C<%ENV> or C<$env> depending on the
+expansion section itself. If the corresponding value is not present or
+is C<undef>:
+
+=over
+
+=item *
+
+by default the empty string is used
+
+=item *
+
+if option C<require_all> in the mangler definition is set to a (Perl)
+true value, the whole expansion I<fails> and returns C<undef> or
+whatever default value has been set in C<default_key> or
+C<default_value> for keys and values respectively.
+
+=back
+
+If the expansion above yields C<undef>:
+
+=over
+
+=item *
+
+if it's the expansion of a key, it is skipped;
+
+=item *
+
+if it's the expansion of a value, L<Removing Variables> applies (i.e.
+the variable is not set and removed if present).
+
+=back
+
+
+=head2 Removing Variables
+
+In addition to setting values, you can also remove them (e.g. suppose
+that you are getting some headers and you want to silence them (e.g. for
+debugging purposes). To do this, just set the corresponding key to
+C<undef>:
+
+   ...
+   remove_me => undef,
+   ...
+
+This actually works whenever the expanded value returns C<undef>,
+although this never happens by default because C<undef> values in the
+expansion are turned into empty strings:
+
+   ...
+   will_be_empty => '[% ENV:inexistent_value %]',
+   ...
+
+See L</Expansion> for making the above return C<undef> (via
+C<require_all>) and trigger the removal of C<will_be_empty>.
+
+=head2 Ordering Manglers
+
+If you plan using intermediate variables for building up complex values,
+you might want to switch to the I<array reference> form of the mangler
+definition (see L</Defining Manglers>), because the hash-based
+alternatives require more care.
+
+As an example, the following will NOT do what you think:
+
+   # using plain hash way... and being BITEN HARD!
+   my $me = Plack::Middleware::MangleEnv->new(
+      foo => 'FOO',
+      bar => 'Hey [% env:foo %]',
+   );
+
+This is because the following array-based rendition will be used:
+
+   [
+      bar => 'Hey [% env:foo %]',
+      foo => 'FOO',
+   ]
+
+i.e. C<bar> will be eventually expanded I<before> C<foo>. This is
+because keys are used for ordering manglers when transforming to the
+array-based form.
+
+The ordering part is actually there to help you, because by default Perl
+does not guarantee I<any kind of order> when you expand a hash to the
+list of key/value pairs. So, at least, in this case you have some
+guarantees!
+
+So what can you do? You can take advantage of the full form for defining
+a mangler, like this:
+
+   # using plain hash way... more verbose but correct now
+   my $me = Plack::Middleware::MangleEnv->new(
+      '1' => { key => foo => value => 'FOO' },
+      '2' => { key => bar => value => 'Hey [% env:foo %]'},
+   );
+
+The hash keys C<1> and C<2> will be used to order manglers, so they are
+set correctly now:
+
+   [
+      '1' => { key => foo => value => 'FOO' },
+      '2' => { key => bar => value => 'Hey [% env:foo %]'},
+   ]
+
+Note that the mangler definitions already contain a C<key> field, so
+neither C<1> nor C<2> will be used to override this field, which is the
+same as the following array form:
+
+   [
+      { key => foo => value => 'FOO' },
+      { key => bar => value => 'Hey [% env:foo %]'},
+   ]
+
+i.e. what you were after in the first place.
+
+Takeaway: if you can, always use the array-based form!
 
 
 =head1 METHODS
@@ -386,305 +582,144 @@ little sense in doing this!
 =back
 
 Methods described in the following subsections can be overridden or used
-in derived classes. The various C<generate*_manglers> functions have the
-plural form because they can potentially return a list of manglers; in
-this module, anyway, each of them returns one single mangler per call.
+in derived classes, with the exception of L</new>.
 
-=head2 B<< generate_array_manglers >>
+=head2 B<< escaped_index >>
 
-   my @manglers = $obj->generate_array_manglers($key, $aref, $defaults);
+   my $i = $obj->escaped_index($template, $str, $esc, $pos);
 
-generate manglers starting from an array definition. C<$aref> MUST be
-an C<ARRAY> reference. Depending on the number of elements in C<@$aref>:
+Low-level method for finding the first unescaped occurrence of C<$str>
+inside C<$template>, starting from C<$pos> and considering C<$esc> as
+the escape sequence. Returns -1 if the search is unsuccessful, otherwise
+the index value in the string (indexes start from 0), exactly as
+C<CORE::index>.
 
-=over
+=head2 B<< escaped_trim >>
 
-=item *
+   my $trimmed = $obj->escaped_trim($str, $esc);
 
-if no element is present, a I<remove> mangler is generated via
-L</generate_remove_manglers>
+Low-level function to trim away spaces from an escaped string. It takes
+care to remove all leading spaces, and all unescaped trailing spaces
+(there can be no "escaped leading spaces" because escape sequences
+cannot start with a space).
 
-=item *
+Note that trimming targets only plain horizontal spaces (ASCII 0x20).
 
-if exactly one element is present, a I<value> mangler is generated via
-L</generate_immediate_manglers> with type C<value>
+=head2 B<< generate_mangler >>
 
-=item *
+   my $mangler = $obj->generate_mangler($input_definition);
 
-otherwise, an exception is thrown.
+Generate a mangler from an input definition.
 
-=back
+The input definition MUST be a hash reference with fields explained in
+section L</Defining Manglers>.
 
-=head2 B<< generate_code_manglers >>
+Returns a new mangler.
 
-   my @manglers = $obj->generate_code_manglers($key, $sub, $defaults);
+It is used by L</prepare_app> to set the list of manglers that will be
+used during expansion.
 
-generate manglers from a sub definition. C<$sub> MUST be a C<CODE>
-reference.
+=head2 B<< new >>
 
-The provided sub is wrapped using L</wrap_code> to set the right
-behaviour around C<$sub>, then the output mangler is returned as
-follows:
+   # Alternative 1, when %hash DOES NOT contain a "manglers" key
+   my $mw_h = Plack::Middleware::MangleEnv->new(%hash);
 
-   [$key => {%$defaults, wrapsub => $wrapped_sub}]
+   # Alternative 2, "manglers" points to a hash ref
+   my $mw_r = Plack::Middleware::MangleEnv->new(
+      manglers => $hash_or_array_ref, # array ref is PREFERRED
+      opts     => \%hash_with_options
+   )
 
-=head2 B<< generate_hash_manglers >>
+You are not supposed to use this method directly, although these are
+exactly the same parameters that you are supposed to pass e.g. to
+C<builder> in L<Plack::Builder>.
 
-   my @manglers = $obj->generate_hash_manglers($key, $hash, $defaults);
+The first form is I<quick and dirty> and should be fine in most of the
+simple cases, like if you just want to set a few variables taking them
+from the environment (C<%ENV>) and you're fine with the default options.
 
-generate manglers from a hash definition. C<$hash> MUST be a C<HASH>
-reference. This is actually a dispatcher for the different methods named
-C<generate_hash_manglers_*>, which can be overridden or added in derived
-classes to support further conversion types.
+The second form allows you to pass options, e.g. to change the
+delimiters for expansion sections, and also to define the sequence of
+manglers as an array reference, which is quite important if you are
+going to do fancy things (see L</Ordering Manglers> for example).
 
-=head2 B<< generate_hash_manglers_ENV >>
-
-   my @manglers = $obj->generate_hash_manglers_ENV($key, $name, $opts);
-
-generate mangler for taking C<$ENV{$name}>.
-
-=head2 B<< generate_hash_manglers_env >>
-
-   my @manglers = $obj->generate_hash_manglers_env($key, $name, $opts);
-
-generate mangler for taking C<$env->{$name}>.
-
-=head2 B<< generate_hash_manglers_list >>
-
-   my @manglers = $obj->generate_hash_manglers_env($key, $cfg, $opts);
-
-generate mangler for generating a list of elements from hash
-configuration C<%$cfg>. The following keys are supported:
+Available opts are:
 
 =over
 
-=item C<default>
+=item C<esc>
 
-a default value to assign if the source element is not present or has an
-undefined value. If it is an array reference, it follows the same rules
-explained at L</Array reference>. If an item in C<sources> has a
-C<default> configuration, that takes precedence. If not present, the
-same as setting C<[]> is assumed (i.e. undefined values will be
-removed).
+the escape sequence to use when parsing a template (see
+L</Template rules>). This can be overridden on a per-mangler basis.
 
-=item C<default_on_empty>
+Defaults to a single backslash C<\>.
 
-boolean, apply the C<default> above to empty values too, in addition to
-undefined values. Defaults to 0;
+=item C<start>
 
-=item C<flatten>
+the start sequence to use when parsing a template (see
+L</Template rules>). This can be overridden on a per-mangler basis.
 
-boolean, turn array reference values into a list. Defaults to 0;
+Defaults to string C<[%>, in L<Template::Toolkit> spirit.
 
-=item C<join>
+=item C<stop>
 
-specification of a I<source> (see below for the I<source specification>
-provided for key C<sources>) where it's possible to take a string for
-joining the elements of the list together. In this case, a single string
-will be returned.
+the stop sequence to use when parsing a template (see
+L</Template rules>). This can be overridden on a per-mangler basis.
 
-=item C<remove_if>
-
-array reference to strings that will be removed when found;
-
-=item C<sources>
-
-array reference of hashes, explained below.
+Defaults to string C<%]>, in L<Template::Toolkit> spirit.
 
 =back
 
-The different source specifications in C<sources> can take all the keys
-above as an overriding specialization (with the exception of
-C<sources>), and the following additional ones:
+=head2 B<< normalize_input_structure >>
+
+   my $normal = $obj->normalize_input_structure($source, $defaults);
+
+normalizes the object internally landing you with the following fields:
 
 =over
 
-=item C<env>
+=item C<app>
 
-=item C<ENV>
+=item C<manglers>
 
-=item C<value>
-
-mutually exclusive keys indicating where the value should be taken from.
+=item C<opts>
 
 =back
 
-=head2 B<< generate_hash_manglers_remove >>
+where C<manglers> is in the array form and C<opts> has any missing item
+initialised to the corresponding default (if not already present).
 
-Same as L</generate_remove_manglers>.
+=head2 B<< parse_template >>
 
-=head2 B<< generate_hash_manglers_sub >>
+   my $expandable = $obj->parse_template($template, $start, $stop, $esc);
 
-Same as L</generate_code_manglers>.
-
-=head2 B<< generate_hash_manglers_value >>
-
-   my @manglers =
-     $obj->generate_hash_manglers_value($key, $value, $opts);
-
-generate mangler for taking C<$value>.
-
-=head2 B<< generate_immediate_manglers >>
-
-   my @manglers =
-     $obj->generate_immediate_manglers($type, $key, $value, $opts);
-
-generates this mangler:
-
-   [$key => {%$opts, $type => $value}]
-
-i.e. the standard mangler for setting something immediately handled.
-
-Note that this has the initial value for C<$type>, differently from
-other C<generate*_manglers> functions.
-
-=head2 B<< generate_manglers >>
-
-   my @manglers = $obj->generate_manglers($key, $value, $defaults);
-
-Generate zero, one or more manglers, dispatching to the proper function
-depending on the type of C<$value>. C<$defaults> is a hash reference
-holding default values for the generated mangler, e.g. setting
-C<override> to 1 by default.
-
-At the moment, all generation methods return exactly one mangler per
-call. This can of course change in derived classes, hence the returned
-value can contain any number of items.
-
-This method does the following dispatching based on C<ref($value)>:
+applies the parsing explained in section L</Template rules> and returns
+an array reference of sequences of either plain text chunks, or hash
+references each containing:
 
 =over
 
-=item *
+=item C<src>
 
-non-reference scalars: L</generate_immediate_manglers> with type C<value>
+either C<env> or C<ENV>
 
-=item *
+=item C<key>
 
-array references: L</generate_array_manglers>
-
-=item *
-
-hash references: L</generate_hash_manglers>
-
-=item *
-
-code references: L</generate_code_manglers>
-
-=item *
-
-anything else throws an exception.
+the key to use inside the C<src> for expanding a variable.
 
 =back
 
-If you want to override it (e.g. to add support for different types, or
-change the default ones described above) you might augment it like in
-the following example:
+This method is quite low-level and you have to explicitly pass the
+start, stop and escaping sequences, making sure they don't tread on each
+other.
 
-   # suppose we want to do something with Regexp references
+Used by L</generate_mangler>.
 
-   package Plack::Middleware::MangleEnv::Derived;
-   use parent 'Plack::Middleware::MangleEnv';
-   sub generate_manglers {
-      my $self = shift;
+=head2 B<< unescape >>
 
-      return $self->generate_regex_manglers(@_)
-        if ref($_[1]) eq 'Regexp';
+   my $text = $obj->unescape($escaped_text, $esc);
 
-      return $self->SUPER::generate_manglers(@_);
-   }
-   sub generate_regex_manglers {
-      my ($self, $key, $regex, $defaults) = @_;
-      my $sub = sub {
-         defined(my $value = shift) or return; # do nothing if undef
-         my ($capture) = $value =~ m{$regex};
-         return $capture;
-      };
-      my $wrapsub = $self->wrap_code($sub);
-      return [$key => {%$defaults, wrapsub => $wrapsub}];
-   }
-   1;
-
-=head2 B<< generate_remove_manglers >>
-
-   my @manglers =
-     $obj->generate_remove_manglers($key, $value, $defaults);
-
-convenience function to generate manglers for removing. Such manglers
-are supposed to have this form:
-
-   [ $key => { remove => 1 } ]
-
-and this function does exactly this, ignoring C<$defaults> and checking
-that C<$value> is empty if it is a hash reference (it is used by
-L</generate_hash_manglers> behind the scenes, so this checks that there
-are no further keys in the input mangler definition).
-
-=head2 B<< get_values_from_source >>
-
-   my @values = $obj->get_values_from_source($env, $spec);
-
-runtime helper that expands the C<$spec> according to the rules
-explained in L</generate_hash_manglers_list> for each source.
-
-=head2 B<< normalize_source >>
-
-   my $normal = $obj->normalize_source($source, $defaults);
-
-normalizes a source (see L</generate_hash_manglers_list>) turning the
-pair with key C<env>, C<ENV> or C<value> into two pair, one with key
-C<type> and another one with key C<value>. Example:
-
-   { env => 'whatever' }  -->  { type => 'env', value => 'whatever' }
-
-Values for options (e.g. C<default>, C<default_on_empty>, etc.) are
-taken from hash reference C<$source> and, if absent, from C<$defaults>.
-
-=head2 B<< push_manglers >>
-
-   $obj->push_manglers->(@manglers);
-
-add the provided C<@manglers> to the list of manglers that will be used
-at runtime.
-
-Used by C<prepare_app> to populate the list of runtime manglers from the
-provided inputs. For every input definition of a mangler,
-L</generate_manglers> is called and its output fed to this method, like
-this:
-
-   my @manglers = $obj->generate_manglers(...);
-   $obj->push_manglers(@manglers);
-
-You might want to override this method if you want to further process
-I<all> the generated manglers, like this:
-
-   package Plack::Middleware::MangleEnv::Derived;
-   use parent 'Plack::Middleware::MangleEnv';
-   sub push_manglers {
-      my $self = shift;
-      my @manglers = map { do_something($_) } @_;
-      return $self->SUPER::push_manglers(@manglers);
-   }
-   ...
-
-
-=head2 B<< stringified_list >>
-
-   my @strings = $obj->stringified_list(@list);
-
-convenience function to generate a list of strings suitable for logging.
-Defined element are escaped and put into single quotes, while C<undef>
-is rendered as the string C<undef> (without quoting).
-
-=head2 B<< wrap_code >>
-
-   my $wrapped_sub = $obj->wrap_code($sub);
-
-wrap a code sub adhering to the L</Sub Reference Interface> to implement
-the behaviour described in the same subsection. It is used by both
-L</generate_code_manglers> and L</generate_hash_manglers> to wrap input
-C<sub>s.
-
+Removes the escaping sequence C<$esc> from C<$escaped_text>.
 
 =head1 BUGS AND LIMITATIONS
 

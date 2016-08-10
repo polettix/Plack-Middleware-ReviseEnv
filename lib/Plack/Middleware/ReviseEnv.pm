@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Carp qw< confess >;
 use English qw< -no_match_vars >;
-{ our $VERSION = '0.002'; }
+{ our $VERSION = '0.004'; }
 
 use parent 'Plack::Middleware';
 

@@ -56,7 +56,7 @@
    "provides" : {
       "Plack::Middleware::ReviseEnv" : {
          "file" : "lib/Plack/Middleware/ReviseEnv.pm",
-         "version" : "0.002"
+         "version" : "0.004"
       }
    },
    "release_status" : "stable",
@@ -71,7 +71,7 @@
          "web" : "https://github.com/polettix/Plack-Middleware-ReviseEnv"
       }
    },
-   "version" : "0.002",
+   "version" : "0.004",
    "x_contributors" : [
       "Flavio Poletti <flavio@polettix.it>"
    ]

@@ -14,27 +14,31 @@ sub call {
  REVISOR:
    for my $revisor (@{$self->{revisors} || []}) {
       my ($key, $value) = map {
-         my $def_parts = $revisor->{$_};
-         my $retval;
-         if (defined $def_parts) {
+         my $retval = $revisor->{$_};
+
+         # if array reference, there's more work to do
+         if (ref $retval) {
             my $all_defs = 1;
             my @parts = grep { defined($_) ? 1 : ($all_defs = 0) } map {
                (!ref($_)) ? $_
                  : exists($vars{$_->{src}}{$_->{key}})
                  ? $vars{$_->{src}}{$_->{key}}
                  : undef;
-            } @$def_parts;
+            } @$retval;
 
-            if ($revisor->{require_all} && (!$all_defs)) {
-               $retval = undef;
-            }
-            else {
-               $retval = join '', @parts;
-            }
-         } ## end if (defined $def_parts)
+            $retval = ($revisor->{require_all} && (!$all_defs))
+               ? undef
+               : join '', @parts;
+         } ## end if (defined $retval)
+
+         # last chance to have a say on $retval...
          $retval = $revisor->{'default_' . $_}
            if (!defined($retval))
            || ((length($retval) == 0) && $revisor->{empty_as_default});
+
+         # save for next iteration, if so requested
+         $revisor->{$_} = $retval if $revisor->{cache};
+
          $retval;
       } qw< key value >;
 
@@ -102,6 +106,7 @@ sub generate_revisor {
    $m{override} = 1 unless exists $m{override};
    $m{key}   = $self->parse_template($m{key},   $start, $stop, $esc);
    $m{value} = $self->parse_template($m{value}, $start, $stop, $esc);
+   $m{cache} = $opts->{cache} unless exists $m{cache};
 
    return \%m;
 } ## end sub generate_revisor
@@ -222,6 +227,7 @@ sub normalize_input_structure {
    $opts->{start} ||= '[%';
    $opts->{stop}  ||= '%]';
    $opts->{esc}   ||= '\\';
+   $opts->{cache} = 1 unless exists $opts->{cache};
 
    my $revisors = exists($self->{revisors})
      ? delete($self->{revisors})            # just take it

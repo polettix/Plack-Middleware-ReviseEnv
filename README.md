@@ -265,6 +265,17 @@ case, to trigger more advanced features you have to pass the whole hash
 reference definition for a revisors.  The hash can contain the following
 keys:
 
+- `cache`
+
+    after computing a value the first time, cache the result for all following
+    invocations. This will speed up the execution at the expense of flexibility.
+
+    You might want to use this option if you're only relying on value coming from
+    `%ENV` and your code is not going to change its items dynamically. As this is
+    probably the most common case, this option defaults to `1`, which means that
+    the value will be cached. You can disable it either in the `opts` in the
+    constructor, or per-revisor, by setting it to a Perl-false value;
+
 - `default_key`
 - `default_value`
 
@@ -426,9 +437,20 @@ the `opts` for the object, of course).
 
 ### Expansion
 
-While parsing happens once, expansion of templates happens every time
-the `call` method is invoked, which should mean at each request hitting
-Plack.
+While parsing happens once at the beginning (during phase `prepare_app`),
+usage of a parsed template happens at `call` time, i.e. at every request
+hitting the plugin.
+
+The first time the request comes, the parsed template is evaluated according to
+what described below. Depending on the value of `cache` (which can be set both
+in `opts` for the constructor, and in each revisor singularly), this value
+might be reused for following calls (providing better performance) or computed
+each time (providing greater flexibility to cope with changing inputs). Caching
+is enabled by default, assuming that most of the times you will just want to
+get values from an unchanging environment; if you need to do fancier things,
+though, you can disable it altogether (setting option `cache` to a false value
+in the constructor parameters) or for each single revisor that needs special
+attention.
 
 During expansion, text parts are passed verbatim, while expansion
 sections take the value from either `%ENV` or `$env` depending on the
@@ -602,6 +624,18 @@ revisors as an array reference, which is quite important if you are
 going to do fancy things (see ["Ordering Revisors"](#ordering-revisors) for example).
 
 Available opts are:
+
+- `cache`
+
+    boolean flag indicating, when true, that expanded values (see ["Expansion"](#expansion))
+    should be cached for later reuse in following calls. This improves performance
+    (values are computed only the first time they are needed) at the expense of
+    flexibility (if you have a changing `%ENV` or rely on values in `$env` that
+    depend on the specific call, caching will not take those changes). This can be
+    overridden on a per-revisor basis.
+
+    Defaults to 1 i.e. caching is enabled for all revisors by default; disable it
+    inside a revisor that needs dynamic computing of its value.
 
 - `esc`
 

@@ -1,5 +1,6 @@
 {{$NEXT}}
    - add Travis-CI integration
+   - add HTML boilerplate in documentation
    - release after CPAN Testers are fine (thanks!)
 
 0.001001  2016-08-09 18:45:01 CEST

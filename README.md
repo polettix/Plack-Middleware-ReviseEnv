@@ -7,6 +7,32 @@ Plack::Middleware::ReviseEnv - Revise request environment at will
 This document describes Plack::Middleware::ReviseEnv version {{\[ version
 \]}}.
 
+<div>
+    <a href="https://travis-ci.org/polettix/Plack-Middleware-ReviseEnv">
+    <img alt="Build Status" src="https://travis-ci.org/polettix/Plack-Middleware-ReviseEnv.svg?branch=master">
+    </a>
+
+    <a href="https://www.perl.org/">
+    <img alt="Perl Version" src="https://img.shields.io/badge/perl-5.8+-brightgreen.svg">
+    </a>
+
+    <a href="https://badge.fury.io/pl/Plack-Middleware-ReviseEnv">
+    <img alt="Current CPAN version" src="https://badge.fury.io/pl/Plack-Middleware-ReviseEnv.svg">
+    </a>
+
+    <a href="http://cpants.cpanauthors.org/dist/Plack-Middleware-ReviseEnv">
+    <img alt="Kwalitee" src="http://cpants.cpanauthors.org/dist/Plack-Middleware-ReviseEnv.png">
+    </a>
+
+    <a href="http://www.cpantesters.org/distro/P/Plack-Middleware-ReviseEnv.html?distmat=1">
+    <img alt="CPAN Testers" src="https://img.shields.io/badge/cpan-testers-blue.svg">
+    </a>
+
+    <a href="http://matrix.cpantesters.org/?dist=Plack-Middleware-ReviseEnv">
+    <img alt="CPAN Testers Matrix" src="https://img.shields.io/badge/matrix-@testers-blue.svg">
+    </a>
+</div>
+
 # SYNOPSIS
 
     use Plack::Middleware::ReviseEnv;

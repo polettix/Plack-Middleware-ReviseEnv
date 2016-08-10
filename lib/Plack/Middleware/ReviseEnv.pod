@@ -29,7 +29,7 @@ This document describes Plack::Middleware::ReviseEnv version {{[ version
 <img alt="Kwalitee" src="http://cpants.cpanauthors.org/dist/Plack-Middleware-ReviseEnv.png">
 </a>
 
-<a href="http://www.cpantesters.org/distro/D/Plack-Middleware-ReviseEnv.html?distmat=1">
+<a href="http://www.cpantesters.org/distro/P/Plack-Middleware-ReviseEnv.html?distmat=1">
 <img alt="CPAN Testers" src="https://img.shields.io/badge/cpan-testers-blue.svg">
 </a>
 
